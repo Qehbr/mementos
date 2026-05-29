@@ -1,0 +1,111 @@
+{
+  "name": "mementos",
+  "version": "1.0.0",
+  "description": "Encrypted AI memory vault for any AI tool. E2EE vectors, RAG retrieval, git sync.",
+  "type": "module",
+  "main": "dist/cli/index.js",
+  "bin": {
+    "mementos": "dist/cli/index.js"
+  },
+  "scripts": {
+    "build": "rm -rf dist && tsc",
+    "clean": "rm -rf dist",
+    "dev": "tsx src/cli/index.ts",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "eslint .",
+    "bench": "tsx tools/bench.ts",
+    "bench:fast": "tsx tools/bench.ts --no-scale --no-cold --no-retrievers",
+    "bench:retrieval": "tsx tools/bench-retrieval.ts",
+    "bench:qa": "tsx tools/bench-qa.ts",
+    "dead": "knip",
+    "dead:methods": "tsx tools/find-unused-methods.ts",
+    "test:docker:openclaw": "docker build -f tests/docker/integration-test.Dockerfile --build-arg TOOL=openclaw --build-arg SMOKE=tests/docker/openclaw-smoke.ts -t mementos-openclaw-test . && docker run --rm mementos-openclaw-test",
+    "test:docker:claude-code": "docker build -f tests/docker/integration-test.Dockerfile --build-arg TOOL=@anthropic-ai/claude-code --build-arg SMOKE=tests/docker/claude-code-smoke.ts -t mementos-claude-code-test . && docker run --rm mementos-claude-code-test",
+    "test:docker:claude-code-ingestor": "docker build -f tests/docker/integration-test.Dockerfile --build-arg TOOL=@anthropic-ai/claude-code --build-arg SMOKE=tests/docker/claude-code-ingestor-smoke.ts -t mementos-cc-ingestor-test . && docker run --rm mementos-cc-ingestor-test",
+    "test:docker:codex": "docker build -f tests/docker/integration-test.Dockerfile --build-arg TOOL=@openai/codex --build-arg SMOKE=tests/docker/codex-smoke.ts -t mementos-codex-test . && docker run --rm mementos-codex-test",
+    "test:docker:antigravity-cli": "docker build -f tests/docker/antigravity-cli.Dockerfile -t mementos-antigravity-cli-test . && docker run --rm mementos-antigravity-cli-test",
+    "test:docker:opencode": "docker build -f tests/docker/integration-test.Dockerfile --build-arg TOOL=opencode-ai --build-arg SMOKE=tests/docker/opencode-smoke.ts -t mementos-opencode-test . && docker run --rm mementos-opencode-test",
+    "test:docker:openclaw-ingestor": "docker build -f tests/docker/integration-test.Dockerfile --build-arg \"TOOL=openclaw @openai/codex\" --build-arg SMOKE=tests/docker/openclaw-ingestor-smoke.ts -t mementos-oc-ingestor-test . && docker run --rm mementos-oc-ingestor-test",
+    "test:docker:opencode-ingestor": "docker build -f tests/docker/integration-test.Dockerfile --build-arg TOOL=opencode-ai --build-arg SMOKE=tests/docker/opencode-ingestor-smoke.ts -t mementos-opencode-ingestor-test . && docker run --rm mementos-opencode-ingestor-test",
+    "prepublishOnly": "npm run build"
+  },
+  "files": [
+    "dist",
+    "assets"
+  ],
+  "keywords": [
+    "mcp",
+    "memory",
+    "ai",
+    "encryption",
+    "vault",
+    "rag",
+    "vector",
+    "claude",
+    "cursor",
+    "e2ee"
+  ],
+  "author": "Yuriy Rusanov",
+  "license": "Apache-2.0",
+  "engines": {
+    "node": ">=22.5"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Qehbr/mementos.git"
+  },
+  "homepage": "https://github.com/Qehbr/mementos#readme",
+  "bugs": {
+    "url": "https://github.com/Qehbr/mementos/issues"
+  },
+  "dependencies": {
+    "@inquirer/prompts": "^8.4.3",
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "@napi-rs/keyring": "^1.3.0",
+    "@scure/bip39": "^1.3.0",
+    "@xenova/transformers": "^2.17.2",
+    "proper-lockfile": "^4.1.2",
+    "zod": "^3.25.76"
+  },
+  "peerDependencies": {
+    "hnswlib-node": "3.0.0",
+    "openai": "6.38.0",
+    "simple-git": "3.36.0",
+    "bonjour-service": "1.3.0",
+    "re2": "1.24.1"
+  },
+  "peerDependenciesMeta": {
+    "hnswlib-node": {
+      "optional": true
+    },
+    "openai": {
+      "optional": true
+    },
+    "simple-git": {
+      "optional": true
+    },
+    "bonjour-service": {
+      "optional": true
+    },
+    "re2": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@types/node": "^22.0.0",
+    "@types/proper-lockfile": "^4.1.4",
+    "bonjour-service": "1.3.0",
+    "eslint": "^10.3.0",
+    "hnswlib-node": "3.0.0",
+    "knip": "^6.12.1",
+    "openai": "6.38.0",
+    "re2": "1.24.1",
+    "simple-git": "3.36.0",
+    "tsx": "^4.0.0",
+    "typescript": "^5.0.0",
+    "typescript-eslint": "^8.59.2",
+    "vitest": "^4.1.5"
+  }
+}

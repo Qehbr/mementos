@@ -1,0 +1,8 @@
+{"sessionId":"sess-abc","projectHash":"hash123abc","startTime":"2026-05-01T10:00:00.000Z","lastUpdated":"2026-05-01T10:00:05.000Z","kind":"main"}
+{"id":"m1","type":"user","timestamp":"2026-05-01T10:00:01.000Z","content":"I prefer tabs over spaces."}
+{"id":"m2","type":"gemini","timestamp":"2026-05-01T10:00:02.000Z","content":[{"text":"Got it — "},{"text":"tabs it is."}],"model":"gemini-2.5-pro","tokens":{"input":10,"output":5,"cached":0,"total":15}}
+{"id":"m3","type":"info","timestamp":"2026-05-01T10:00:03.000Z","content":"Workspace directory added."}
+{"id":"m4","type":"user","timestamp":"2026-05-01T10:00:04.000Z","content":"Actually, use 2-space indentation."}
+{"$rewindTo":"m4"}
+{"id":"m5","type":"user","timestamp":"2026-05-01T10:00:05.000Z","content":{"text":"Keep tabs after all."}}
+{"id":"m6","type":"gemini","timestamp":"2026-05-01T10:00:06.000Z","content":[{"functionCall":{"name":"read_file"}}]}

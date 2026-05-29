@@ -1,0 +1,34 @@
+[
+  {
+    "type": "message",
+    "subtype": "channel_join",
+    "user": "U01ALICE",
+    "text": "<@U01ALICE> has joined the channel",
+    "ts": "1705312800.000100"
+  },
+  {
+    "type": "message",
+    "user": "U01ALICE",
+    "text": "The Q4 report is ready, see <https://example.com/q4|the doc>.",
+    "ts": "1705316400.000200",
+    "client_msg_id": "aaaa-bbbb-cccc-dddd",
+    "team": "T0WORKSPACE",
+    "user_profile": { "display_name": "alice", "real_name": "Alice Adams", "name": "alice", "image_72": "https://example.com/a.png" }
+  },
+  {
+    "type": "message",
+    "user": "U02BOB",
+    "text": "Thanks <@U01ALICE>! I'll review it.",
+    "ts": "1705316460.000300",
+    "thread_ts": "1705316400.000200",
+    "parent_user_id": "U01ALICE",
+    "user_profile": { "display_name": "", "real_name": "Bob Brown", "name": "bob", "image_72": "https://example.com/b.png" }
+  },
+  {
+    "type": "message",
+    "subtype": "bot_message",
+    "bot_id": "B099CI",
+    "text": "build #1421 passed",
+    "ts": "1705316500.000400"
+  }
+]

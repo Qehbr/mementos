@@ -1,0 +1,54 @@
+name: Release
+
+# Triggered by pushing a git tag matching v*.*.* (e.g. v1.0.0, v1.0.1, v1.1.0-rc.1).
+# Auth: npm Trusted Publishing via OIDC (configured on npmjs.com for this package +
+# this workflow). No NPM_TOKEN secret needed — `id-token: write` below is what npm
+# exchanges for a short-lived publish token at run time. Trusted Publishing requires
+# npm >= 11.5.1, which is why this workflow uses Node 24 (ships npm 11) instead of
+# Node 22 (ships npm 10, doesn't speak the new OIDC handshake).
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+jobs:
+  publish:
+    name: Build + test + publish to npm
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write   # required for OIDC auth to npm (trusted publishing)
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+          cache: npm
+
+      - run: npm ci
+
+      - name: Tag matches package.json version
+        run: |
+          PKG_VERSION=$(node -p "require('./package.json').version")
+          TAG_VERSION="${GITHUB_REF_NAME#v}"
+          if [ "$PKG_VERSION" != "$TAG_VERSION" ]; then
+            echo "::error::tag $GITHUB_REF_NAME (=$TAG_VERSION) does not match package.json version $PKG_VERSION"
+            exit 1
+          fi
+
+      - run: npm run lint
+      - run: npm run build
+
+      # Same as CI: tests exercise optional peerDeps that live in pluginsDir.
+      - name: Install optional plugins for tests
+        run: |
+          mkdir -p ~/.config/mementos/plugins
+          npm install --prefix ~/.config/mementos/plugins --no-save \
+            hnswlib-node@3.0.0 re2@1.24.1 simple-git@3.36.0 bonjour-service@1.3.0
+
+      - run: npm test
+
+      - name: Publish to npm
+        run: npm publish --access public

@@ -1,0 +1,13 @@
+node_modules/
+dist/
+.env
+*.js.map
+PLAN.md
+DESIGN.md
+# personal scratch files / scripts not part of the project
+code-dump.txt
+scripts/
+TODOs
+# integration test scratch (HOME dirs, bare git remotes, etc.)
+src/__tests__/tmp/
+benchmarks/

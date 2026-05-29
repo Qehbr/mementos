@@ -1,0 +1,16 @@
+{
+  "name": "Carol",
+  "type": "personal_chat",
+  "id": 888000222,
+  "messages": [
+    {
+      "id": 10,
+      "type": "message",
+      "date": "2024-01-16T09:00:00",
+      "date_unixtime": "1705395600",
+      "from": "Carol",
+      "from_id": "user333",
+      "text": "Single-chat export works."
+    }
+  ]
+}

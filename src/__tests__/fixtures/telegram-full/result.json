@@ -1,0 +1,57 @@
+{
+  "about": "Here is the data you requested. Please note: this data is not intended...",
+  "chats": {
+    "about": "This page lists all chats from this export.",
+    "list": [
+      {
+        "name": "Alice",
+        "type": "personal_chat",
+        "id": 777000111,
+        "messages": [
+          {
+            "id": 1,
+            "type": "service",
+            "date": "2024-01-15T10:00:00",
+            "date_unixtime": "1705312800",
+            "actor": "Alice",
+            "actor_id": "user111",
+            "action": "create_group",
+            "title": "Project"
+          },
+          {
+            "id": 2,
+            "type": "message",
+            "date": "2024-01-15T10:30:00",
+            "date_unixtime": "1705314600",
+            "from": "Alice",
+            "from_id": "user111",
+            "text": "I prefer tabs over spaces.",
+            "text_entities": [{ "type": "plain", "text": "I prefer tabs over spaces." }]
+          },
+          {
+            "id": 3,
+            "type": "message",
+            "date": "2024-01-15T10:31:00",
+            "date_unixtime": "1705314660",
+            "from": "Bob",
+            "from_id": "user222",
+            "reply_to_message_id": 2,
+            "text": ["Agreed — see ", { "type": "link", "text": "the style guide" }, "."]
+          },
+          {
+            "id": 4,
+            "type": "message",
+            "date": "2024-01-15T10:32:00",
+            "date_unixtime": "1705314720",
+            "from": "Bob",
+            "from_id": "user222",
+            "text": "",
+            "photo": "photos/photo_1@15-01-2024_10-32-00.jpg",
+            "width": 1280,
+            "height": 720
+          }
+        ]
+      }
+    ]
+  }
+}

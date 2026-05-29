@@ -1,0 +1,11 @@
+[
+  {
+    "type": "message",
+    "user": "U02BOB",
+    "text": "Morning team — kicking off the sprint.",
+    "ts": "1705399200.000100",
+    "client_msg_id": "eeee-ffff-0000-1111",
+    "team": "T0WORKSPACE",
+    "user_profile": { "display_name": "bob", "real_name": "Bob Brown", "name": "bob", "image_72": "https://example.com/b.png" }
+  }
+]

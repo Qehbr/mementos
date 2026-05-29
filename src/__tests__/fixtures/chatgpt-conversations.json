@@ -1,0 +1,128 @@
+[
+  {
+    "title": "TypeScript preferences",
+    "create_time": 1715000000.0,
+    "update_time": 1715000200.0,
+    "mapping": {
+      "node-root": { "id": "node-root", "message": null, "parent": null, "children": ["node-sys"] },
+      "node-sys": {
+        "id": "node-sys",
+        "message": {
+          "id": "node-sys",
+          "author": { "role": "system", "name": null, "metadata": {} },
+          "create_time": null,
+          "update_time": null,
+          "content": { "content_type": "text", "parts": [""] },
+          "status": "finished_successfully",
+          "end_turn": true,
+          "weight": 1.0,
+          "metadata": { "is_visually_hidden_from_conversation": true },
+          "recipient": "all",
+          "channel": null
+        },
+        "parent": "node-root",
+        "children": ["node-a1"]
+      },
+      "node-a1": {
+        "id": "node-a1",
+        "message": {
+          "id": "node-a1",
+          "author": { "role": "user", "name": null, "metadata": {} },
+          "create_time": 1715000001.0,
+          "update_time": null,
+          "content": { "content_type": "text", "parts": ["I prefer tabs over spaces in TypeScript."] },
+          "status": "finished_successfully",
+          "end_turn": null,
+          "weight": 1.0,
+          "metadata": { "timestamp_": "absolute", "message_type": null },
+          "recipient": "all",
+          "channel": null
+        },
+        "parent": "node-sys",
+        "children": ["node-a2"]
+      },
+      "node-a2": {
+        "id": "node-a2",
+        "message": {
+          "id": "node-a2",
+          "author": { "role": "assistant", "name": null, "metadata": {} },
+          "create_time": 1715000002.0,
+          "update_time": null,
+          "content": { "content_type": "text", "parts": ["Noted — tabs it is."] },
+          "status": "finished_successfully",
+          "end_turn": true,
+          "weight": 1.0,
+          "metadata": { "model_slug": "gpt-4o", "finish_details": { "type": "stop", "stop": "<|im_end|>" }, "timestamp_": "absolute" },
+          "recipient": "all",
+          "channel": null
+        },
+        "parent": "node-a1",
+        "children": ["node-a3"]
+      },
+      "node-a3": {
+        "id": "node-a3",
+        "message": {
+          "id": "node-a3",
+          "author": { "role": "user", "name": null, "metadata": {} },
+          "create_time": 1715000003.0,
+          "update_time": null,
+          "content": { "content_type": "multimodal_text", "parts": [{ "content_type": "image_asset_pointer", "asset_pointer": "file-service://file-abc", "size_bytes": 1234 }, "And use Zustand for state."] },
+          "status": "finished_successfully",
+          "end_turn": null,
+          "weight": 1.0,
+          "metadata": { "timestamp_": "absolute", "message_type": null },
+          "recipient": "all",
+          "channel": null
+        },
+        "parent": "node-a2",
+        "children": []
+      }
+    },
+    "moderation_results": [],
+    "current_node": "node-a3",
+    "plugin_ids": null,
+    "conversation_id": "11111111-2222-4333-8444-555555555555",
+    "conversation_template_id": null,
+    "gizmo_id": null,
+    "is_archived": false,
+    "safe_urls": [],
+    "default_model_slug": "gpt-4o",
+    "id": "11111111-2222-4333-8444-555555555555"
+  },
+  {
+    "title": "Tool-only chat",
+    "create_time": 1715100000.0,
+    "update_time": 1715100050.0,
+    "mapping": {
+      "n-root": { "id": "n-root", "message": null, "parent": null, "children": ["n-tool"] },
+      "n-tool": {
+        "id": "n-tool",
+        "message": {
+          "id": "n-tool",
+          "author": { "role": "tool", "name": "browser", "metadata": {} },
+          "create_time": 1715100000.0,
+          "update_time": null,
+          "content": { "content_type": "tether_browsing_display", "result": "web search results ..." },
+          "status": "finished_successfully",
+          "end_turn": null,
+          "weight": 1.0,
+          "metadata": {},
+          "recipient": "all",
+          "channel": null
+        },
+        "parent": "n-root",
+        "children": []
+      }
+    },
+    "moderation_results": [],
+    "current_node": "n-tool",
+    "plugin_ids": null,
+    "conversation_id": "99999999-2222-4333-8444-555555555555",
+    "conversation_template_id": null,
+    "gizmo_id": null,
+    "is_archived": false,
+    "safe_urls": [],
+    "default_model_slug": "gpt-4o",
+    "id": "99999999-2222-4333-8444-555555555555"
+  }
+]

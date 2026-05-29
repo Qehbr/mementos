@@ -1,0 +1,15 @@
+{
+  "$schema": "https://unpkg.com/knip@6/schema.json",
+  "entry": [
+    "src/storage/*/index.ts!",
+    "src/embeddings/*/index.ts!",
+    "src/vector/*/index.ts!",
+    "src/keys/*/index.ts!",
+    "src/integrations/*/index.ts!",
+    "src/retrievers/*/index.ts!",
+    "src/searchers/*/index.ts!",
+    "src/ingestors/*/index.ts!"
+  ],
+  "project": ["src/**/*.ts!"],
+  "ignoreExportsUsedInFile": true
+}

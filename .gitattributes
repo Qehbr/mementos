@@ -1,0 +1,3 @@
+# The iOS WhatsApp-export fixture is genuinely CRLF — keep it byte-for-byte so the
+# ingestor's CRLF handling stays exercised. Git would otherwise normalise line endings.
+src/__tests__/fixtures/whatsapp-ios.txt -text
