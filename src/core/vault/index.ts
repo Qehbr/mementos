@@ -32,7 +32,7 @@ import {
 import { randomUUID } from 'node:crypto'
 import { validateId, idFromMemFilename } from './constants.js'
 import { encryptMemPayloads, decryptMemChunks, decryptMemMeta } from './aad.js'
-import { withLock } from './lock.js'
+import { WriteLock } from './lock.js'
 import { tryLoadIndexCache, saveIndexCache } from './cache.js'
 import { MetaStore, metaMatches, isMetaFilterActive, type MetaFilter } from './meta-store.js'
 import { chunkKey, mementoIdOf, chunkIndexOf } from './chunk-key.js'
@@ -141,9 +141,16 @@ export class Vault {
    * `process.exit(0)` could kill writeFile mid-write and truncate the cache.
    */
   private inFlightFlush: Promise<void> | null = null
+  /**
+   * Re-entrant write lock. Use `vault.writeLock.runBatch(fn)` to hold across
+   * many inner writes (e.g. CLI ingest); inner `writeMemento`/`ingest`/...
+   * calls automatically re-enter rather than re-acquire.
+   */
+  readonly writeLock: WriteLock
 
   constructor(private readonly deps: VaultDeps) {
     this.syncIntervalMs = deps.syncIntervalMs ?? SYNC_INTERVAL_MS
+    this.writeLock = new WriteLock(deps.lockPath)
   }
 
   // ─── Lifecycle ────────────────────────────────────────────────────────────
@@ -193,7 +200,7 @@ export class Vault {
   /** Persist the in-memory index to the encrypted cache; cheap no-op if clean. */
   async flushCache(): Promise<void> {
     if (!this.key) return
-    await withLock(this.deps.lockPath, async () => {
+    await this.writeLock.run(async () => {
       if (!this.cacheDirty) return
       const entries = [...this.metaById.values()].map(m => ({ id: m.id, mtimeMs: m.mtimeMs }))
       await saveIndexCache(this.deps.index, this.getKey(), entries)
@@ -328,7 +335,7 @@ export class Vault {
   }
 
   private async doSync(): Promise<SyncSummary> {
-    return withLock(this.deps.lockPath, async () => {
+    return this.writeLock.run(async () => {
       await this.deps.storage.sync()
 
       const onDisk = await this.deps.storage.list()
@@ -469,7 +476,7 @@ export class Vault {
    */
   async writeMemento(memory: Memory): Promise<WriteOutcome> {
     await this.syncIfStale()
-    return withLock(this.deps.lockPath, () => this.doWriteMemento(memory))
+    return this.writeLock.run(() => this.doWriteMemento(memory))
   }
 
   private async doWriteMemento(memory: Memory): Promise<WriteOutcome> {
@@ -516,7 +523,7 @@ export class Vault {
     opts: { tags?: string[]; createdAt?: string } = {},
   ): Promise<{ added: number; skipped: number }> {
     await this.syncIfStale()
-    return withLock(this.deps.lockPath, () => this.doIngest(chronicleId, mementos, opts))
+    return this.writeLock.run(() => this.doIngest(chronicleId, mementos, opts))
   }
 
   private async doIngest(
@@ -706,7 +713,7 @@ export class Vault {
   async updateMemento(id: string, text: string): Promise<WriteOutcome> {
     validateId(id)
     await this.syncIfStale()
-    return withLock(this.deps.lockPath, () => this.doUpdateMemento(id, text))
+    return this.writeLock.run(() => this.doUpdateMemento(id, text))
   }
 
   private async doUpdateMemento(id: string, text: string): Promise<WriteOutcome> {
@@ -749,7 +756,7 @@ export class Vault {
   async deleteMemento(id: string): Promise<void> {
     validateId(id)
     await this.syncIfStale()
-    return withLock(this.deps.lockPath, () => this.doDeleteMemento(id))
+    return this.writeLock.run(() => this.doDeleteMemento(id))
   }
 
   private async doDeleteMemento(id: string): Promise<void> {

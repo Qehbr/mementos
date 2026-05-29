@@ -165,6 +165,30 @@ describe('GitBackend', () => {
     expect(data).toEqual(Buffer.from('from b'))
   })
 
+  // Regression for a crash-recovery bug: writeAndStat lands the .mem on disk
+  // before git.add+commit runs. If the process dies between those, the file is
+  // present locally but never reaches the remote. On the next ingest,
+  // vault.startup() sees the file via storage.list(), populates metaById, and
+  // every future ingest marks the same memento "already present" — keeping it
+  // off the remote forever. init() now reconciles uncommitted .mem files.
+  it('init recovers uncommitted .mem files left by a prior crash', async () => {
+    const { writeFile } = await import('node:fs/promises')
+
+    // First init clones; simulate the crash by dropping a .mem file straight onto disk.
+    await makeBackend(local)
+    await writeFile(join(local, 'orphan.mem'), Buffer.from('stranded payload'))
+
+    // Re-init: the recovery step should stage + commit + push the orphan.
+    await makeBackend(local)
+
+    // Confirm by cloning the remote fresh — the file must be there.
+    const verify = join(tmpdir(), 'mementos-git-verify-' + Date.now())
+    git(['clone', bare, verify])
+    const out = await import('node:fs/promises').then(fs => fs.readFile(join(verify, 'orphan.mem')))
+    expect(out).toEqual(Buffer.from('stranded payload'))
+    await rm(verify, { recursive: true, force: true })
+  })
+
   // Regression for the cross-device concurrent-edit handling — two devices both update
   // the same memento before either has synced the other's write. Before the fix, the
   // loser's push failed non-fast-forward, the rebase produced a conflict, and the user

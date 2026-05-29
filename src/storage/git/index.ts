@@ -419,6 +419,35 @@ export class GitBackend implements StorageBackend {
     this.sg = this.newSimpleGit(this.config.localPath, simpleGit)
     // Pull on every init so a re-launched server picks up commits made while it was off.
     await this.sync()
+    // Reconcile crash leftovers: prior writes that landed on disk via writeAndStat
+    // but never reached git.add+commit, plus any local commits that never pushed.
+    // Otherwise vault.startup() would see those files via storage.list(), populate
+    // metaById with their IDs, and the next ingest would mark them "already present"
+    // — silently keeping them off the remote forever.
+    await this.recoverUnpushedWrites()
+  }
+
+  /**
+   * One-shot reconciliation at init. Stages any uncommitted versioned files,
+   * commits them, then pushes (covering both "files on disk but never committed"
+   * and "committed locally but push failed previously"). No-op when clean.
+   */
+  private async recoverUnpushedWrites(): Promise<void> {
+    const git = await this.git()
+    const status = await git.status()
+    const dirty = [
+      ...status.not_added, ...status.modified, ...status.deleted,
+    ].filter(isVersioned)
+
+    if (dirty.length === 0 && status.ahead === 0 && !await this.hasStagedChanges()) return
+
+    if (dirty.length > 0) await git.add(dirty)
+    if (await this.hasStagedChanges()) {
+      await git.commit('recover: bring remote in sync after prior crash')
+    }
+    if (status.ahead > 0 || dirty.length > 0) {
+      await this.pushWithRetry()
+    }
   }
 
   async sync(): Promise<void> {
@@ -491,7 +520,7 @@ export class GitBackend implements StorageBackend {
     await git.add(versionedPaths)
     const summary = versionedPaths.length === 1
       ? versionedPaths[0]
-      : `${versionedPaths.length} files`
+      : `${versionedPaths.length} mementos`
     await this.commitAndPush(`memory: ${summary}`)
     return written
   }

@@ -46,23 +46,28 @@ export async function runSnapshot(payload?: PreCompactPayload): Promise<void> {
   let added = 0
   let skipped = 0
   try {
-    for (const s of sessions) {
-      try {
-        const r = await vault.ingest(s.chronicleId, s.mementos, {
-          tags: s.tags,
-          createdAt: s.createdAt,
-        })
-        added += r.added
-        skipped += r.skipped
-      } catch (e) {
-        // Don't exit-immediately on a per-chronicle failure: the finally below needs to
-        // flush the cache for the 0..N-1 that succeeded, or every failed snapshot drifts
-        // the cache one ingest behind.
-        console.error(`mementos snapshot: ingest failed for chronicle ${s.chronicleId}: ${(e as Error).message}`)
-        process.exitCode = 1
-        break
+    // Hold the write lock once across all sessions — see the comment on the
+    // identical wrapper in `runIngest`; same in-process timer/long-write race
+    // applies here when a session embeds a large batch.
+    await vault.writeLock.run(async () => {
+      for (const s of sessions) {
+        try {
+          const r = await vault.ingest(s.chronicleId, s.mementos, {
+            tags: s.tags,
+            createdAt: s.createdAt,
+          })
+          added += r.added
+          skipped += r.skipped
+        } catch (e) {
+          // Don't exit-immediately on a per-chronicle failure: the finally below needs to
+          // flush the cache for the 0..N-1 that succeeded, or every failed snapshot drifts
+          // the cache one ingest behind.
+          console.error(`mementos snapshot: ingest failed for chronicle ${s.chronicleId}: ${(e as Error).message}`)
+          process.exitCode = 1
+          break
+        }
       }
-    }
+    })
   } finally {
     await vault.close()
   }

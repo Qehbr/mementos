@@ -77,12 +77,13 @@ export async function runIngest(positional: string | undefined, _rest: string[])
   }
 
   const stats: IngestStats = { written: 0, duplicates: 0, errors: 0 }
-  for (const { file, ingestor } of matches) {
+
+  const runOne = async (file: string, ingestor: Ingestor): Promise<void> => {
     try {
       const sessions = await ingestor.parse(file)
       if (sessions.length === 0) {
         console.log(`  skip ${displayName(file)} (no content after filtering)`)
-        continue
+        return
       }
       for (const s of sessions) {
         if (dryRun) {
@@ -104,6 +105,19 @@ export async function runIngest(positional: string | undefined, _rest: string[])
       console.error(`  error ${displayName(file)}: ${(e as Error).message}`)
       stats.errors++
     }
+  }
+
+  // Batch ingest is one logical write — hold the lock ONCE for the whole loop
+  // rather than acquire/release per session. Thousands of acquire/release cycles
+  // would otherwise create a race window where a concurrent process (e.g. an
+  // active MCP server) could steal the lock between cycles, ECOMPROMISED-crash
+  // the watchdog, and tear down the ingest mid-batch.
+  if (vault && !dryRun) {
+    await vault.writeLock.run(async () => {
+      for (const { file, ingestor } of matches) await runOne(file, ingestor)
+    })
+  } else {
+    for (const { file, ingestor } of matches) await runOne(file, ingestor)
   }
 
   if (vault) await vault.close()
