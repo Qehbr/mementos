@@ -1,5 +1,5 @@
 /**
- * LocalEmbedder — on-device embeddings via `all-MiniLM-L6-v2` (ONNX runtime).
+ * MinilmEmbedder — on-device embeddings via `all-MiniLM-L6-v2` (ONNX runtime).
  *
  * Default embedder: 384-dim, runs on CPU, no API key. Output is mean-pooled and L2-normalized
  * so cosine distance is the natural similarity metric (matches HNSWIndex's `'cosine'` space).
@@ -15,24 +15,24 @@ import { embedInBatches } from '../_utils/batch.js'
 import { MODEL_ID, DIMENSIONS, BATCH_SIZE } from './constants.js'
 
 // ─── Discovery contract ───────────────────────────────────────────────────────
-export const type = 'local'
+export const type = 'minilm'
 export function create(): EmbeddingProvider {
-  return new LocalEmbedder()
+  return new MinilmEmbedder()
 }
 /**
  * Warm the model cache at init: one throwaway embed front-loads the ~150 MB download so
  * `mementos serve` never blocks a first recall (and an online `init` leaves it usable offline).
  */
 export async function setupAtInit(ctx: InitContext): Promise<void> {
-  ctx.print('Preparing the local embedding model (all-MiniLM-L6-v2 — first run downloads ~150 MB)...')
-  await new LocalEmbedder().embed('warmup')
-  ctx.print('Local embedding model ready.')
+  ctx.print('Preparing the MiniLM embedding model (all-MiniLM-L6-v2 — first run downloads ~150 MB)...')
+  await new MinilmEmbedder().embed('warmup')
+  ctx.print('MiniLM embedding model ready.')
 }
 const _shape: EmbedderImplementationModule = { type, create, setupAtInit }
 
 type Pipeline = (input: string | string[], opts: object) => Promise<{ data: Float32Array }>
 
-export class LocalEmbedder implements EmbeddingProvider {
+export class MinilmEmbedder implements EmbeddingProvider {
   readonly dimensions = DIMENSIONS
 
   private pipeline: Pipeline | null = null

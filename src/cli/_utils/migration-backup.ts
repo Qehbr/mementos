@@ -45,7 +45,7 @@ export async function stageVaultFiles(
   await mkdir(stagingDir, { recursive: true })
   // Parallel per-file fan-out — each file is independent (separate path, separate I/O,
   // resume-skip is decided per-file). For key migration that's a real I/O parallel win
-  // on a 100k vault; for embedder migration the LocalEmbedder's single ONNX session is
+  // on a 100k vault; for embedder migration the MinilmEmbedder's single ONNX session is
   // still the serial bottleneck inside `transform`, so the outer fan-out doesn't hurt.
   const files = await storage.list()
   await Promise.all(files.map(async f => {

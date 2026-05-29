@@ -32,7 +32,7 @@ Hooks are always opt-in (`mementos integration hook enable <name>`); the default
 
 ## What `mementos init` does
 
-Interactive by default — every choice has a sensible default you accept with Enter. It asks for the storage backend (`local`/`git`), embedder (`local`/`openai`), vector index, key provider (`keychain`/`env`), and retriever; generates the vault key (shown once — write it down); offers to set up the AI-client integrations; then writes two config files:
+Interactive by default — every choice has a sensible default you accept with Enter. It asks for the storage backend (`local`/`git`), embedder (`minilm`/`openai`), vector index, key provider (`keychain`/`env`), and retriever; generates the vault key (shown once — write it down); offers to set up the AI-client integrations; then writes two config files:
 
 - **`~/.config/mementos/config.json`** — per-device: `vaultPath`, `backend`, `vectorIndex`, `retriever`, `searcher`, `keyProvider`, plus the backend's `backendConfig` blob (e.g. `{ remote, sshKeyPath? }` for git). Outside the vault directory so it never pollutes `git status` or lands in a shared repo.
 - **`<vaultPath>/vault.json`** — per-vault: `embedder`. Written **through the storage backend** (so `GitBackend` commits + pushes it) — it travels with the vault to every device.

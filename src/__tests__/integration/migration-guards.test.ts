@@ -21,7 +21,7 @@ describe('migration guards', () => {
   beforeEach(async () => {
     ctx = await setupTestEnv()
     await runInitWithFlags([
-      '--backend=local', '--embedder=local', '--index=hnsw',
+      '--backend=local', '--embedder=minilm', '--index=hnsw',
       '--key=env', '--integrations=none',
     ])
   })
@@ -80,7 +80,7 @@ describe('migration guards', () => {
     })
 
     // The backup directory: the memento as it was BEFORE the migration — a 384-dim
-    // vector (the local embedder), plus the vault.json the migration would restore.
+    // vector (the MiniLM embedder), plus the vault.json the migration would restore.
     const backupDir = backupDirFor(ctx.vaultPath, '2026-05-16T10:00:00Z')
     await mkdir(backupDir, { recursive: true })
     await writeFile(join(backupDir, `${id}.mem`),

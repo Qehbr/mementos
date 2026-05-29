@@ -21,7 +21,7 @@ describe('init → buildVault → write → retrieve (local backend)', () => {
   it('writes machine config, vault config, and round-trips a memory', async () => {
     await runInitWithFlags([
       '--backend=local',
-      '--embedder=local',
+      '--embedder=minilm',
       '--index=hnsw',
       '--key=env',
       '--integrations=none',
@@ -41,7 +41,7 @@ describe('init → buildVault → write → retrieve (local backend)', () => {
     // would mismatch the embedder's actual dims on a future write — the embedder owns it.
     const vaultRaw = await readFile(join(ctx.vaultPath, 'vault.json'), 'utf8')
     const vault = JSON.parse(vaultRaw) as Record<string, unknown>
-    expect(vault).toEqual({ embedder: 'local' })
+    expect(vault).toEqual({ embedder: 'minilm' })
     expect(vault).not.toHaveProperty('dimensions')
 
     // Now exercise the seam — buildVault must construct a working Vault from the

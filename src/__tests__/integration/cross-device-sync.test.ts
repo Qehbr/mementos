@@ -71,7 +71,7 @@ describe('cross-device passive sync (after both machines initialized)', () => {
     await runInitWithFlags([
       '--backend=git',
       `--git-remote=${bareRepo}`,
-      '--embedder=local',
+      '--embedder=minilm',
       '--index=hnsw',
       '--key=env',
       '--integrations=none',

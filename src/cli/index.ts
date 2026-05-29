@@ -107,7 +107,7 @@ Usage:
                                                readable). By default only the backends you
                                                pick are installed (thin, on demand); --full
                                                pre-fetches every optional backend + the
-                                               local embedding model so the vault then runs
+                                               MiniLM embedding model so the vault then runs
                                                fully offline. Flags below skip prompts:
     --full                  pre-install all optional backends + model (offline-ready)
     --mode=new|join
@@ -119,7 +119,7 @@ Usage:
                             ed25519 key at ~/.ssh/mementos_vault_<hash>; <path> uses your
                             own private key; 'inherit' (or absent in scripted mode) falls
                             back to the host ssh-agent / ~/.ssh/config.
-    --embedder=local|openai
+    --embedder=minilm|openai
     --index=hnsw
     --retriever=semantic|hybrid
     --searcher=scan|trigram|none

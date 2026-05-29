@@ -152,16 +152,16 @@ async function runInitNew(deps: InitDeps): Promise<void> {
     ctx, 'Where should the vault live?', 'vault-path',
     existing?.vaultPath ?? vaultPath(),
   )
-  const embedderType = await promptChoice(ctx, 'Embedder', 'embedder', embedderReg, 'local')
+  const embedderType = await promptChoice(ctx, 'Embedder', 'embedder', embedderReg, 'minilm')
   if (embedderType === 'openai') {
     // mementos's headline is E2EE — but the openai embedder sends raw memory text to
     // OpenAI's API. Users picking 'openai' to "get better recall" without reading the
     // README would silently forfeit the property they came for. Surface the trade-off at
-    // the moment of decision; the local default is privacy-safe.
+    // the moment of decision; the on-device minilm default is privacy-safe.
     ctx.print('')
     ctx.print('Note: the openai embedder sends every memento\'s text to OpenAI\'s API for embedding.')
     ctx.print('Encryption protects data AT REST in the vault, but NOT this network call.')
-    ctx.print('For full end-to-end privacy, re-run init with --embedder=local.')
+    ctx.print('For full end-to-end privacy, re-run init with --embedder=minilm.')
     ctx.print('')
   }
   const indexType = await promptChoice(ctx, 'Vector index', 'index', indexReg, 'hnsw')
@@ -351,7 +351,7 @@ async function runInitJoin(deps: InitDeps): Promise<void> {
 /**
  * `--full` install. Regular `init` installs only the backends the user picked — the
  * thin, on-demand default. `--full` additionally pre-fetches every optional backend and
- * the local embedding model, trading a longer one-time setup for zero later network
+ * the MiniLM embedding model, trading a longer one-time setup for zero later network
  * dependence: run it online once and the vault works fully offline afterward.
  *
  * No-op unless `--full` is passed. Idempotent — every install underneath skips work
@@ -367,12 +367,12 @@ async function runFullInstall(
   ctx.print('--full: pre-installing every optional backend (needs a network now;')
   ctx.print('afterward mementos runs without one).')
   await ensureAllPlugins(s => ctx.print(s))
-  // Warm the local embedding model so the offline-capable default embedder is ready even
-  // when the user picked `openai` — they can switch to `local` later with no network.
-  // Skipped when `local` was the choice: its setupAtInit already ran in the main loop.
-  if (chosenEmbedder !== 'local') {
-    const localImpl = embedderReg.get('local')
-    if (localImpl) await runSetupAtInit(localImpl, ctx)
+  // Warm the on-device MiniLM model so the offline-capable default embedder is ready even
+  // when the user picked `openai` — they can switch to `minilm` later with no network.
+  // Skipped when `minilm` was the choice: its setupAtInit already ran in the main loop.
+  if (chosenEmbedder !== 'minilm') {
+    const minilmImpl = embedderReg.get('minilm')
+    if (minilmImpl) await runSetupAtInit(minilmImpl, ctx)
   }
   ctx.print('Full install complete — mementos can now run fully offline.')
 }

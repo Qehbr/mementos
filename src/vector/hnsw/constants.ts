@@ -37,7 +37,7 @@ export const HNSW_RANDOM_SEED = 100
 export const MAX_ELEMENTS = 100_000
 
 /**
- * Distance metric. `'cosine'` matches the L2-normalized output of LocalEmbedder and the
+ * Distance metric. `'cosine'` matches the L2-normalized output of MinilmEmbedder and the
  * normalized vectors returned by OpenAI's embedding models — cosine distance is the
  * natural similarity metric for both.
  */

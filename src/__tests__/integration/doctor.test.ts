@@ -77,7 +77,7 @@ describe('mementos doctor', () => {
   it('reports all green for a healthy fresh vault', async () => {
     // Init a vault with one memory so the decrypt probe has something to chew on.
     await runInit([
-      '--backend=local', '--embedder=local', '--index=hnsw', '--key=env',
+      '--backend=local', '--embedder=minilm', '--index=hnsw', '--key=env',
       '--integrations=none', `--vault-path=${join(homeDir, '.mementos')}`,
     ])
     const { buildVault } = await import('../../cli/_utils/vault.js')
@@ -121,7 +121,7 @@ describe('mementos doctor', () => {
   it('reports Key fail and skips decrypt probe when env var was removed', async () => {
     // Healthy init, then unset the env var to simulate "user opened a new shell."
     await runInit([
-      '--backend=local', '--embedder=local', '--index=hnsw', '--key=env',
+      '--backend=local', '--embedder=minilm', '--index=hnsw', '--key=env',
       '--integrations=none', `--vault-path=${join(homeDir, '.mementos')}`,
     ])
     delete process.env['MEMENTOS_RAW_KEY']
@@ -139,7 +139,7 @@ describe('mementos doctor', () => {
   it('handles an empty vault (no .mem files yet) without a Decrypt probe failure', async () => {
     // Init but skip writing any memory.
     await runInit([
-      '--backend=local', '--embedder=local', '--index=hnsw', '--key=env',
+      '--backend=local', '--embedder=minilm', '--index=hnsw', '--key=env',
       '--integrations=none', `--vault-path=${join(homeDir, '.mementos')}`,
     ])
 

@@ -22,7 +22,7 @@ describe('write_memento MCP handler — duplicate is guidance, not an error', ()
   afterEach(async () => { await ctx.cleanup() })
 
   it('returns the duplicate guidance as non-error content (not isError)', async () => {
-    await runInitWithFlags(['--backend=local', '--embedder=local', '--index=hnsw', '--key=env', '--integrations=none'])
+    await runInitWithFlags(['--backend=local', '--embedder=minilm', '--index=hnsw', '--key=env', '--integrations=none'])
     const { buildVault } = await import('../../cli/_utils/vault.js')
     const { createMcpServer } = await import('../../core/mcp.js')
     const vault = await buildVault()

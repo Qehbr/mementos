@@ -105,7 +105,7 @@ describe('mementos migrate (key)', () => {
   it('re-encrypts every .mem file under the new key, swaps the stored key, deletes manifest', async () => {
     // Set up a fresh vault with two memories.
     await runInit([
-      '--backend=local', '--embedder=local', '--index=hnsw', '--key=env',
+      '--backend=local', '--embedder=minilm', '--index=hnsw', '--key=env',
       '--integrations=none', `--vault-path=${join(homeDir, '.mementos')}`,
     ])
     const { buildVault } = await import('../../cli/_utils/vault.js')
@@ -169,7 +169,7 @@ describe('mementos migrate (key)', () => {
     // Build a vault, write a memory, simulate a partial key migration: leave a
     // manifest on disk + a .mem.new sibling (encrypted under the target mnemonic).
     await runInit([
-      '--backend=local', '--embedder=local', '--index=hnsw', '--key=env',
+      '--backend=local', '--embedder=minilm', '--index=hnsw', '--key=env',
       '--integrations=none', `--vault-path=${join(homeDir, '.mementos')}`,
     ])
     const { buildVault } = await import('../../cli/_utils/vault.js')
@@ -217,7 +217,7 @@ describe('mementos migrate (key)', () => {
   it('resume with a WRONG mnemonic refuses cleanly when a staged file exists', async () => {
     // Build the vault.
     await runInit([
-      '--backend=local', '--embedder=local', '--index=hnsw', '--key=env',
+      '--backend=local', '--embedder=minilm', '--index=hnsw', '--key=env',
       '--integrations=none', `--vault-path=${join(homeDir, '.mementos')}`,
     ])
     const { buildVault } = await import('../../cli/_utils/vault.js')
@@ -272,7 +272,7 @@ describe('mementos migrate (key)', () => {
 
   it('--abort on an untouched vault finalizes cleanly and leaves the .mem files alone', async () => {
     await runInit([
-      '--backend=local', '--embedder=local', '--index=hnsw', '--key=env',
+      '--backend=local', '--embedder=minilm', '--index=hnsw', '--key=env',
       '--integrations=none', `--vault-path=${join(homeDir, '.mementos')}`,
     ])
     const { buildVault } = await import('../../cli/_utils/vault.js')
@@ -308,7 +308,7 @@ describe('mementos migrate (key)', () => {
 
   it('--abort restores the pre-migration vault from the backup (no mnemonic needed)', async () => {
     await runInit([
-      '--backend=local', '--embedder=local', '--index=hnsw', '--key=env',
+      '--backend=local', '--embedder=minilm', '--index=hnsw', '--key=env',
       '--integrations=none', `--vault-path=${join(homeDir, '.mementos')}`,
     ])
     const { buildVault } = await import('../../cli/_utils/vault.js')
@@ -357,7 +357,7 @@ describe('mementos migrate (key)', () => {
 
   it('typing mismatched mnemonic confirmations re-prompts, then completes on a match', async () => {
     await runInit([
-      '--backend=local', '--embedder=local', '--index=hnsw', '--key=env',
+      '--backend=local', '--embedder=minilm', '--index=hnsw', '--key=env',
       '--integrations=none', `--vault-path=${join(homeDir, '.mementos')}`,
     ])
     const { buildVault } = await import('../../cli/_utils/vault.js')

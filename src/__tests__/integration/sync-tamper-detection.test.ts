@@ -26,7 +26,7 @@ describe('sync detects file-content swap (regression for v3 #2)', () => {
   it('logs id-mismatch warning when a.mem holds b.mem content; doesn\'t corrupt index', async () => {
     await runInitWithFlags([
       '--backend=local',
-      '--embedder=local',
+      '--embedder=minilm',
       '--index=hnsw',
       '--key=env',
       '--integrations=none',

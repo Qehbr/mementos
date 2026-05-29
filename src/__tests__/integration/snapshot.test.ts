@@ -34,7 +34,7 @@ describe('mementos snapshot', () => {
   beforeEach(async () => {
     ctx = await setupTestEnv()
     await runInitWithFlags([
-      '--backend=local', '--embedder=local', '--index=hnsw',
+      '--backend=local', '--embedder=minilm', '--index=hnsw',
       '--key=env', '--integrations=none',
     ])
     // Silence log output from snapshot to keep test output readable.

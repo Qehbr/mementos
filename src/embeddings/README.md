@@ -18,7 +18,7 @@ Adding a new embedder is one folder under `src/embeddings/<name>/` — see [CONT
 
 | | Description |
 |---|---|
-| **`LocalEmbedder`** | `all-MiniLM-L6-v2` via the ONNX runtime. 384-dim, CPU-only, no API key, no network after the first model download. The model is lazy-loaded on first call (~150 MB) and cached on disk thereafter. Output is mean-pooled and L2-normalized so cosine distance is the natural metric. **Default.** |
+| **`MinilmEmbedder`** | `all-MiniLM-L6-v2` via the ONNX runtime. 384-dim, CPU-only, no API key, no network after the first model download. The model is lazy-loaded on first call (~150 MB) and cached on disk thereafter. Output is mean-pooled and L2-normalized so cosine distance is the natural metric. **Default.** |
 | **`OpenAIEmbedder`** | `text-embedding-3-small` (512-dim default). API key from `OPENAI_API_KEY`, deferred to first network call (`buildVault` constructs the embedder just to read `.dimensions`). **Privacy warning** surfaced at `init` time: memory text is sent in plaintext to OpenAI's API for embedding — mementos's encryption protects data **at rest**, not the embedding call. |
 
 ## How similarity is measured

@@ -89,7 +89,7 @@ describe('GitBackend', () => {
 
   it('put commits vault.json so config syncs across devices', async () => {
     const b = await makeBackend(local)
-    await b.put('vault.json', Buffer.from('{"embedder":"local"}'))
+    await b.put('vault.json', Buffer.from('{"embedder":"minilm"}'))
 
     const log = execFileSync('git', ['log', '--oneline', 'main'], { cwd: bare }).toString()
     expect(log).toContain('vault.json')

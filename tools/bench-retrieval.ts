@@ -182,8 +182,8 @@ const subset = sample(dataset, parseQuestionLimit(dataset.length), SEED)
 console.log(`  using ${subset.length} questions`)
 
 console.log('\nWarming embedder…')
-const { LocalEmbedder } = await import('../src/embeddings/local/index.js')
-const embedder = new LocalEmbedder()
+const { MinilmEmbedder } = await import('../src/embeddings/minilm/index.js')
+const embedder = new MinilmEmbedder()
 await embedder.embed('warmup')
 
 console.log(`\nEmbedding haystacks…  (${subset.reduce((s, q) => s + q.haystack_sessions.length, 0)} sessions across ${subset.length} questions)`)

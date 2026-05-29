@@ -280,6 +280,6 @@ npm run bench:qa -- --rejudge \
   --qa-judge-model=gpt-4o-2024-08-06
 ```
 
-First run downloads `longmemeval_s_cleaned.json` (~277 MB) into `~/.cache/mementos/` and embeds ~19k unique sessions (~12 min with `LocalEmbedder`). Embeddings are cached incrementally (keyed by SHA-256 of each document), so re-runs are near-instant and an interrupted run resumes. `--doc-mode=full` and `--doc-mode=user-only` produce different document text and therefore cache separately.
+First run downloads `longmemeval_s_cleaned.json` (~277 MB) into `~/.cache/mementos/` and embeds ~19k unique sessions (~12 min with `MinilmEmbedder`). Embeddings are cached incrementally (keyed by SHA-256 of each document), so re-runs are near-instant and an interrupted run resumes. `--doc-mode=full` and `--doc-mode=user-only` produce different document text and therefore cache separately.
 
 The harness is deterministic: same dataset + same flags ⇒ same result.

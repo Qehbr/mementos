@@ -13,7 +13,7 @@ The CLI dispatcher is [src/cli/index.ts](index.ts); subcommand handlers live und
 mementos init [--mode=new|join] [--reinit] [--full]
                                 # interactive setup; --mode=join attaches this machine to
                                 # a vault that exists elsewhere; --full pre-installs every
-                                # optional backend and warms the local embedding model
+                                # optional backend and warms the MiniLM embedding model
 
 # Day-to-day
 mementos serve                  # start the MCP server (run by the AI client, not by hand)

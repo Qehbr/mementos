@@ -25,7 +25,7 @@ describe('mementos init re-run guards', () => {
   async function freshInit(extra: string[] = []): Promise<void> {
     await runInitWithFlags([
       '--backend=local',
-      '--embedder=local',
+      '--embedder=minilm',
       '--index=hnsw',
       '--key=env',
       '--integrations=none',
@@ -55,7 +55,7 @@ describe('mementos init re-run guards', () => {
     await expect(
       runInitWithFlags([
         '--backend=local',
-        '--embedder=local',
+        '--embedder=minilm',
         '--index=hnsw',
         '--key=keychain',  // <-- different from existing machine's 'env'
         '--integrations=none',
@@ -70,7 +70,7 @@ describe('mementos init re-run guards', () => {
     await expect(
       runInitWithFlags([
         '--backend=local',
-        '--embedder=openai',  // <-- different from existing vault's 'local'
+        '--embedder=openai',  // <-- different from existing vault's 'minilm'
         '--index=hnsw',
         '--key=env',
         '--integrations=none',

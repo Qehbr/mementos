@@ -6,7 +6,7 @@
  * incomparable across different models, and the HNSW index is built for one specific
  * dimension.
  *
- * Concrete implementations: LocalEmbedder (ONNX, on-device), OpenAIEmbedder (API).
+ * Concrete implementations: MinilmEmbedder (ONNX, on-device), OpenAIEmbedder (API).
  */
 
 export interface EmbeddingProvider {
@@ -19,7 +19,7 @@ export interface EmbeddingProvider {
   /**
    * Embed several texts at once, returning one vector per input in order. Used by the Vault
    * for chunked writes and bulk ingest. API-backed providers (OpenAI) save API calls;
-   * on-device providers (LocalEmbedder) get matmul vectorization across the batch.
+   * on-device providers (MinilmEmbedder) get matmul vectorization across the batch.
    *
    * Must accept an input of ANY size — a large ingest can hand it 10k+ texts. The
    * underlying engines have hard limits (ONNX memory, the OpenAI per-request cap), so an

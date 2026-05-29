@@ -29,7 +29,7 @@ describe('init adopts existing vault.json from storage', () => {
     await mkdir(ctx.vaultPath, { recursive: true })
     await writeFile(
       join(ctx.vaultPath, 'vault.json'),
-      JSON.stringify({ embedder: 'local' }),
+      JSON.stringify({ embedder: 'minilm' }),
       'utf8',
     )
 
@@ -44,7 +44,7 @@ describe('init adopts existing vault.json from storage', () => {
     // The pre-populated vault.json is preserved (init "Adopted" it rather than
     // overwriting). Same content as we put there.
     const adoptedRaw = await readFile(join(ctx.vaultPath, 'vault.json'), 'utf8')
-    expect(JSON.parse(adoptedRaw)).toEqual({ embedder: 'local' })
+    expect(JSON.parse(adoptedRaw)).toEqual({ embedder: 'minilm' })
 
     // Machine config was written too — adoption doesn't skip the rest of init.
     const machineRaw = await readFile(join(ctx.homeDir, '.config', 'mementos', 'config.json'), 'utf8')
@@ -52,11 +52,11 @@ describe('init adopts existing vault.json from storage', () => {
   }, 60_000)
 
   it('refuses to adopt when chosen embedder differs from existing vault.json', async () => {
-    // Pre-existing vault used 'local' embedder
+    // Pre-existing vault used 'minilm' embedder
     await mkdir(ctx.vaultPath, { recursive: true })
     await writeFile(
       join(ctx.vaultPath, 'vault.json'),
-      JSON.stringify({ embedder: 'local' }),
+      JSON.stringify({ embedder: 'minilm' }),
       'utf8',
     )
 
@@ -76,6 +76,6 @@ describe('init adopts existing vault.json from storage', () => {
 
     // Pre-existing vault.json was NOT overwritten by the failed init
     const stillRaw = await readFile(join(ctx.vaultPath, 'vault.json'), 'utf8')
-    expect(JSON.parse(stillRaw)).toEqual({ embedder: 'local' })
+    expect(JSON.parse(stillRaw)).toEqual({ embedder: 'minilm' })
   }, 60_000)
 })

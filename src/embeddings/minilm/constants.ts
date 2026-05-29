@@ -1,4 +1,4 @@
-/** LocalEmbedder constants — all-MiniLM-L6-v2 via the ONNX runtime. */
+/** MinilmEmbedder constants — all-MiniLM-L6-v2 via the ONNX runtime. */
 
 /** HuggingFace model id loaded by `@xenova/transformers`. */
 export const MODEL_ID = 'Xenova/all-MiniLM-L6-v2'

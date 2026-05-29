@@ -42,7 +42,7 @@ describe('git backend cross-device sync (regression for v3 #1)', () => {
     await runInitWithFlags([
       '--backend=git',
       `--git-remote=${bareRepo}`,
-      '--embedder=local',
+      '--embedder=minilm',
       '--index=hnsw',
       '--key=env',
       '--integrations=none',
@@ -54,7 +54,7 @@ describe('git backend cross-device sync (regression for v3 #1)', () => {
       `git -C ${JSON.stringify(bareRepo)} show main:vault.json`,
       { encoding: 'utf8' },
     )
-    expect(JSON.parse(vaultJsonInBare)).toEqual({ embedder: 'local' })
+    expect(JSON.parse(vaultJsonInBare)).toEqual({ embedder: 'minilm' })
 
     // Write a memory on A
     const { buildVault } = await import('../../cli/_utils/vault.js')
@@ -91,10 +91,10 @@ describe('git backend cross-device sync (regression for v3 #1)', () => {
       // Pre-v3-fix, vault.json wouldn't be in the clone and init would have written
       // a fresh one. The integration concern is "do we adopt vs overwrite."
       const vaultRawB = await readFile(join(ctxB.vaultPath, 'vault.json'), 'utf8')
-      expect(JSON.parse(vaultRawB)).toEqual({ embedder: 'local' })
+      expect(JSON.parse(vaultRawB)).toEqual({ embedder: 'minilm' })
 
       // Machine B can read A's memory — the .mem arrived via clone, the AES key matches,
-      // and the embedder dimensions match (both machines use 'local').
+      // and the embedder dimensions match (both machines use 'minilm').
       const vaultB = await buildVault()
       await vaultB.startup()
       const retrieveResult = renderRecall(await vaultB.recall('the user prefers tabs over spaces'))

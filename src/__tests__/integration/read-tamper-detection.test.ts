@@ -25,7 +25,7 @@ describe('readMemento rejects a file whose content was swapped for another memen
   it('throws id-mismatch when a.mem holds b.mem content (no sync in between)', async () => {
     await runInitWithFlags([
       '--backend=local',
-      '--embedder=local',
+      '--embedder=minilm',
       '--index=hnsw',
       '--key=env',
       '--integrations=none',
@@ -53,7 +53,7 @@ describe('readMemento rejects a file whose content was swapped for another memen
   it('the query-ranked get_mementos_in_range branch also refuses a swapped file', async () => {
     await runInitWithFlags([
       '--backend=local',
-      '--embedder=local',
+      '--embedder=minilm',
       '--index=hnsw',
       '--key=env',
       '--integrations=none',

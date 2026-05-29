@@ -97,7 +97,7 @@ describe('mementos migrate (storage)', () => {
     const targetPath = join(homeDir, 'target-vault')
 
     // Set up the source vault.
-    await runInit(['--backend=local', '--embedder=local', '--index=hnsw', '--key=env',
+    await runInit(['--backend=local', '--embedder=minilm', '--index=hnsw', '--key=env',
       '--integrations=none', `--vault-path=${sourcePath}`])
 
     // Write a memory so we have an actual .mem file to copy.
@@ -121,7 +121,7 @@ describe('mementos migrate (storage)', () => {
 
     // Target has vault.json + the .mem file
     const targetVaultJson = await readFile(join(targetPath, 'vault.json'), 'utf8')
-    expect(JSON.parse(targetVaultJson)).toMatchObject({ embedder: 'local' })
+    expect(JSON.parse(targetVaultJson)).toMatchObject({ embedder: 'minilm' })
     const targetEntries = await import('node:fs/promises').then(m => m.readdir(targetPath))
     expect(targetEntries.filter(f => f.endsWith('.mem'))).toHaveLength(1)
 
@@ -145,7 +145,7 @@ describe('mementos migrate (storage)', () => {
     const targetPath = join(homeDir, 'aborted-target')
 
     // Set up source + write a memory
-    await runInit(['--backend=local', '--embedder=local', '--index=hnsw', '--key=env',
+    await runInit(['--backend=local', '--embedder=minilm', '--index=hnsw', '--key=env',
       '--integrations=none', `--vault-path=${sourcePath}`])
     const { buildVault } = await import('../../cli/_utils/vault.js')
     const v = await buildVault()
@@ -200,7 +200,7 @@ describe('mementos migrate (storage)', () => {
     // Migration should refuse BEFORE creating any target artifacts.
     const sourcePath = join(homeDir, 'source-vault')
     const targetPath = join(homeDir, 'target-vault')
-    await runInit(['--backend=local', '--embedder=local', '--index=hnsw', '--key=env',
+    await runInit(['--backend=local', '--embedder=minilm', '--index=hnsw', '--key=env',
       '--integrations=none', `--vault-path=${sourcePath}`])
 
     delete process.env['MEMENTOS_RAW_KEY']
@@ -227,7 +227,7 @@ describe('mementos migrate (storage)', () => {
     const sourcePath = join(homeDir, 'source-vault')
     const targetPath = join(homeDir, 'resume-target')
 
-    await runInit(['--backend=local', '--embedder=local', '--index=hnsw', '--key=env',
+    await runInit(['--backend=local', '--embedder=minilm', '--index=hnsw', '--key=env',
       '--integrations=none', `--vault-path=${sourcePath}`])
     const { buildVault } = await import('../../cli/_utils/vault.js')
     const v = await buildVault()

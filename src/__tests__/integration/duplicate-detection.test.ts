@@ -21,7 +21,7 @@ describe('writeMemento duplicate detection', () => {
   async function freshVault() {
     await runInitWithFlags([
       '--backend=local',
-      '--embedder=local',
+      '--embedder=minilm',
       '--index=hnsw',
       '--key=env',
       '--integrations=none',

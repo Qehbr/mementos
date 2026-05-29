@@ -2,7 +2,7 @@
  * HNSWIndex — VectorIndex backed by hnswlib-node (Hierarchical Navigable Small World).
  *
  * O(log n) approximate nearest-neighbour search, native C++ via N-API. Configured for cosine
- * distance to match LocalEmbedder's L2-normalized output.
+ * distance to match MinilmEmbedder's L2-normalized output.
  *
  * Internal id mapping: hnswlib uses 32-bit integer ids; mementos uses string UUIDs. This
  * class keeps two Maps for the bidirectional translation. The numeric counter is monotonic

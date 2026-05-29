@@ -9,7 +9,7 @@
  * as `mementos init`). Subsequent runs skip the install step.
  *
  * Sections:
- *   1. LocalEmbedder  — cold start, warm single embed, embedBatch throughput
+ *   1. MinilmEmbedder  — cold start, warm single embed, embedBatch throughput
  *   2. HNSWIndex      — build 10K, serialize, load, search k=5/20 (p50/p95/p99)
  *   3. Memory RAM     — RSS delta for a 10K HNSW index
  *   4. Scale curve    — search p50 at 1K / 5K / 10K / 50K
@@ -28,7 +28,7 @@
  *                       for stable retained-RAM numbers.
  *
  * Skip flags:
- *   --no-embed       skip the LocalEmbedder section (saves ~30s first run)
+ *   --no-embed       skip the MinilmEmbedder section (saves ~30s first run)
  *   --no-scale       skip the scaling curve (saves several minutes)
  *   --no-cold        skip the cold/warm startup section
  *   --no-retrievers  skip the retriever comparison section
@@ -122,13 +122,13 @@ const N_MAIN = 10_000      // entries for the main index benchmarks
 const N_SEARCH = 1_000     // search queries per benchmark
 const N_EMBED_WARM = 100   // warm embed samples
 
-// ─── 1. LocalEmbedder ─────────────────────────────────────────────────────────
+// ─── 1. MinilmEmbedder ─────────────────────────────────────────────────────────
 
 if (!NO_EMBED) {
-  section(`LocalEmbedder  (all-MiniLM-L6-v2 · ONNX · ${DIM}-dim)`)
+  section(`MinilmEmbedder  (all-MiniLM-L6-v2 · ONNX · ${DIM}-dim)`)
 
-  const { LocalEmbedder } = await import('../src/embeddings/local/index.js')
-  const embedder = new LocalEmbedder()
+  const { MinilmEmbedder } = await import('../src/embeddings/minilm/index.js')
+  const embedder = new MinilmEmbedder()
 
   const TEXTS = [
     'The user prefers dark mode in all editors.',

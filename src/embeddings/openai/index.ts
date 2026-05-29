@@ -2,7 +2,7 @@
  * OpenAIEmbedder — embeddings via OpenAI's API.
  *
  * Privacy note: memory text is sent in plaintext to OpenAI's servers for embedding.
- * mementos' encryption protects data at rest, NOT the network call. Use the LocalEmbedder
+ * mementos' encryption protects data at rest, NOT the network call. Use the MinilmEmbedder
  * (default) if you don't want memory content to leave the machine.
  *
  * Default model is `text-embedding-3-small` at 512 dimensions, but any OpenAI embedding

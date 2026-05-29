@@ -22,7 +22,7 @@ describe('init with --vault-path=<custom>', () => {
 
     await runInitWithFlags([
       '--backend=local',
-      '--embedder=local',
+      '--embedder=minilm',
       '--index=hnsw',
       '--key=env',
       '--integrations=none',
@@ -54,7 +54,7 @@ describe('init with --vault-path=<custom>', () => {
     await expect(
       runInitWithFlags([
         '--backend=local',
-        '--embedder=local',
+        '--embedder=minilm',
         '--index=hnsw',
         '--key=env',
         '--integrations=none',

@@ -2,7 +2,7 @@
  * Sub-batching for `embedBatch`.
  *
  * `EmbeddingProvider.embedBatch` accepts any number of texts — but the engines underneath
- * have hard limits. `LocalEmbedder` runs the whole batch as one padded ONNX tensor (peak
+ * have hard limits. `MinilmEmbedder` runs the whole batch as one padded ONNX tensor (peak
  * memory and the O(batch × seq²) attention matrix grow with the batch); the OpenAI
  * embeddings endpoint caps a request at 2048 inputs / ~300k tokens. A single large ingest
  * (10k+ sub-chunks) would OOM the former and 400 the latter.

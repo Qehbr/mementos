@@ -12,7 +12,7 @@
  *
  * Built-in identifiers:
  *   - backend:      'local' (filesystem) | 'git'
- *   - embedder:     'local' (all-MiniLM-L6-v2 ONNX) | 'openai'
+ *   - embedder:     'minilm' (all-MiniLM-L6-v2 ONNX) | 'openai'
  *   - keyProvider:  'keychain' (OS keychain + file fallback, HKDF from mnemonic) |
  *                   'env' (raw 32-byte AES key from MEMENTOS_RAW_KEY)
  *   - vectorIndex:  'hnsw'

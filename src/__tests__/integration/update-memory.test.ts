@@ -18,7 +18,7 @@ describe('updateMemento roundtrip', () => {
   async function freshVault() {
     await runInitWithFlags([
       '--backend=local',
-      '--embedder=local',
+      '--embedder=minilm',
       '--index=hnsw',
       '--key=env',
       '--integrations=none',
