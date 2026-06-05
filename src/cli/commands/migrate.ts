@@ -597,12 +597,17 @@ async function doAbort(
       await rm(manifest.targetVaultPath, { recursive: true, force: true })
       // Per-backend reminder of state we DIDN'T touch (e.g. a git remote stays).
       // Build a target-shaped MachineConfig just to instantiate the backend so we
-      // can ask it for its own removal recipe — keeps the special-case out of here.
+      // can ask it for its own removal recipe. Only backend/backendConfig/vaultPath
+      // affect storage construction; the other required fields are filled with empty
+      // strings (backend.create never reads them, so they cannot mislead anyone).
       const targetCfg: MachineConfig = {
         backend: manifest.targetBackend,
         backendConfig: manifest.targetBackendConfig,
         vaultPath: manifest.targetVaultPath,
-        ...(machine ? { keyProvider: machine.keyProvider, retriever: machine.retriever, searcher: machine.searcher, vectorIndex: machine.vectorIndex } : {}),
+        vectorIndex: machine?.vectorIndex ?? '',
+        retriever: machine?.retriever ?? '',
+        searcher: machine?.searcher ?? '',
+        keyProvider: machine?.keyProvider ?? '',
       }
       const targetBackendForRecipe = await buildStorageBackend(targetCfg)
       for (const line of targetBackendForRecipe.describeManualRemoval(manifest.targetVaultPath)) ctx.print(`  ${line}`)
