@@ -122,6 +122,25 @@ export function validateId(id: string): void {
 /** File extension every memento on disk wears. Centralised so a future change lands here. */
 export const MEM_EXTENSION = '.mem'
 
+// ─── Memory index (the curated summary memento) ──────────────────────────────
+
+/**
+ * Reserved tag for the single curated memory-index memento. The AI maintains one
+ * memento with this tag as a high-level summary of vault contents (analogous to
+ * the MEMORY.md index pattern in file-based memory systems). vault.startup()
+ * seeds an empty one if missing, vault.writeMemento rejects a second one, and
+ * the auto-retrieve hook always loads this memento's text so the AI sees the
+ * curated overview every turn without an explicit recall call.
+ */
+export const INDEX_TAG = '_index'
+
+/** Seed body written when no `_index` memento exists. Plain text — no leading
+ *  header, since the retrieve hook prepends its own `[MEMORY-INDEX]:` framing. */
+export const INDEX_SEED_TEXT =
+  '(empty — this memory index gets populated as the AI accumulates ' +
+  'knowledge about the user and ongoing work. Each line links one durable ' +
+  'fact to its memento id. Update this memento, do not create a new one.)'
+
 /**
  * Strip the `.mem` suffix from a memento filename, returning the id. Anchored to the end
  * so a future non-UUID filename containing `.mem` mid-string can't desync the id derivation.

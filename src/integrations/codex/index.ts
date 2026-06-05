@@ -10,10 +10,10 @@ import { homedir } from 'node:os'
 import { cliRunner } from '../_utils/cli-runner.js'
 import { pathExists } from '../../core/_utils/fs.js'
 import type { ClientIntegration } from '../interface.js'
-import { MCP_SERVER_COMMAND, AUTO_RETRIEVE_COMMAND } from '../interface.js'
+import { MCP_SERVER_COMMAND, AUTO_RETRIEVE_COMMAND, SESSION_START_COMMAND } from '../interface.js'
 import type { IntegrationImplementationModule } from '../registry.js'
 import type { InitContext } from '../../core/init-context/interface.js'
-import { promptAutoRetrieveHook } from '../_utils/prompt.js'
+import { promptAutoRetrieveHook, promptHookToggle } from '../_utils/prompt.js'
 import { SKILL_MD, writeSkillFile } from '../_utils/skill.js'
 import { HookRegistry, jsonHooksAdapter, type HookSpec } from '../_utils/hook-registry.js'
 import { withInstallShell } from '../_utils/install-shell.js'
@@ -83,8 +83,18 @@ export class CodexIntegration implements ClientIntegration {
     await withInstallShell(
       { name: this.name, install: () => this.install(), isInstalled: () => this.isInstalled() },
       ctx,
-      () => promptAutoRetrieveHook(ctx, this, type,
-        'Enable Codex auto-retrieval hook? (pre-injects memories before every message; costs tokens on trivial turns)'),
+      async () => {
+        await promptAutoRetrieveHook(ctx, this, type,
+          'Enable Codex auto-retrieval hook? (pre-injects memories before every message; costs tokens on trivial turns)')
+        await promptHookToggle({
+          ctx, flag: `${type}-hook-session-start`, label: 'Session-start hook',
+          integration: type, kind: 'session-start',
+          current: await this.hooks.isHookEnabled('session-start'),
+          promptText: 'Enable Codex session-start hook? (loads the curated memory index ONCE at conversation start so you do not have to recall it; cheap.)',
+          enable: () => this.hooks.enableHook('session-start'),
+          disable: () => this.hooks.disableHook('session-start'),
+        })
+      },
     )
   }
 
@@ -101,15 +111,20 @@ export class CodexIntegration implements ClientIntegration {
   // ─── Hook lifecycle ──────────────────────────────────────────────────────────
 
   /**
-   * One entry per hook kind. Codex has no compaction hook event (its documented events are
-   * SessionStart/PreToolUse/PermissionRequest/PostToolUse/UserPromptSubmit/Stop), so only
-   * `auto-retrieve` is wired. Adding a new kind is one entry here.
+   * One entry per hook kind. Codex's documented events are
+   * SessionStart/PreToolUse/PermissionRequest/PostToolUse/UserPromptSubmit/Stop —
+   * no compaction hook, so no pre-compact kind. Adding a new kind is one entry here.
    */
   private static readonly HOOKS = {
     'auto-retrieve': {
       event: 'UserPromptSubmit',
       command: AUTO_RETRIEVE_COMMAND,
       baseCommand: AUTO_RETRIEVE_COMMAND,
+    },
+    'session-start': {
+      event: 'SessionStart',
+      command: SESSION_START_COMMAND,
+      baseCommand: SESSION_START_COMMAND,
     },
   } as const satisfies Record<string, HookSpec>
 

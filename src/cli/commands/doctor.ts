@@ -162,22 +162,19 @@ async function checkKey(machine: MachineConfig): Promise<CheckResult> {
   if (!machine.keyProvider) {
     return { name: 'Key', status: 'fail', detail: "missing 'keyProvider' in machine config", hint: 'Run: mementos init --reinit' }
   }
+  let provider
   try {
-    const provider = await buildKeyProvider(machine)
+    provider = await buildKeyProvider(machine)
     const k = await provider.getKey()
     if (k.byteLength !== 32) {
       return { name: 'Key', status: 'fail', detail: `derived key is ${k.byteLength} bytes (expected 32)`, hint: 'Likely corrupt mnemonic or env value — investigate before re-init.' }
     }
-    const where = machine.keyProvider === 'keychain'
-      ? 'OS keychain (or chmod-600 fallback)'
-      : `${machine.keyProvider} provider`
-    return { name: 'Key', status: 'ok', detail: where }
+    return { name: 'Key', status: 'ok', detail: provider.describeKeyLocation?.() ?? `${machine.keyProvider} provider` }
   } catch (e) {
     return {
       name: 'Key', status: 'fail', detail: (e as Error).message,
-      hint: machine.keyProvider === 'env'
-        ? `Set MEMENTOS_RAW_KEY in this shell (and any env where mementos runs).`
-        : `Check that the OS keychain is unlocked. Do NOT 'mementos init --reinit' before verifying — that would generate a new key.`,
+      hint: provider?.describeDoctorHint?.()
+        ?? `Investigate before running 'mementos init --reinit' — that would generate a new key.`,
     }
   }
 }
@@ -186,8 +183,9 @@ async function checkStorage(machine: MachineConfig): Promise<CheckResult> {
   if (!machine.backend) {
     return { name: 'Storage', status: 'fail', detail: "missing 'backend' in machine config", hint: 'Run: mementos init --reinit' }
   }
+  let storage
   try {
-    const storage = await buildStorageBackend(machine)
+    storage = await buildStorageBackend(machine)
     // For GitBackend, storage.init() runs the clone-or-noop dance — we skip that here
     // and just attempt a list. On a fresh clone this might 404, but on any existing
     // setup list is the cheapest "is this backend reachable" probe.
@@ -197,9 +195,7 @@ async function checkStorage(machine: MachineConfig): Promise<CheckResult> {
   } catch (e) {
     return {
       name: 'Storage', status: 'fail', detail: (e as Error).message,
-      hint: machine.backend === 'git'
-        ? 'Verify the git remote is reachable and you have credentials.'
-        : 'Check filesystem permissions on the vault path.',
+      hint: storage?.describeDoctorHint?.() ?? 'Check filesystem permissions on the vault path.',
     }
   }
 }

@@ -31,6 +31,13 @@ export const MCP_SERVER_COMMAND = ['mementos', 'serve'] as const
  */
 export const AUTO_RETRIEVE_COMMAND = 'mementos retrieve'
 
+/**
+ * Shell command for the SessionStart hook — emits the curated `_index` memento
+ * as a one-time-per-conversation prelude (NOT per user message). Separate from
+ * `auto-retrieve` to keep the per-message recall path lean.
+ */
+export const SESSION_START_COMMAND = 'mementos session-start'
+
 /** The standard `{ command, args }` MCP-server entry every integration writes into its client config. */
 export function mcpServerEntry(): { command: string; args: string[] } {
   return { command: MCP_SERVER_COMMAND[0], args: MCP_SERVER_COMMAND.slice(1) }

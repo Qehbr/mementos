@@ -1,8 +1,8 @@
 /**
  * MCP server wiring — exposes the Vault's tools over the Model Context Protocol so any
  * compatible AI client can call them: recall, search, write_memento, update_memento,
- * delete_memento, get_memento, get_chronicle, list_chronicles, get_tags,
- * get_recent_mementos, get_mementos_in_range.
+ * delete_memento, get_memento, get_chronicle, list_chronicles, get_tags, list_mementos,
+ * get_memory_index, update_memory_index.
  *
  * `search` is registered only when a lexical searcher is configured (`searcher` is not
  * `none`) — `createMcpServer`'s `searchEnabled` option gates it, so the AI never sees a
@@ -26,7 +26,7 @@ import { fileURLToPath } from 'node:url'
 import { join, dirname } from 'node:path'
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { z } from 'zod'
-import { StaleMementoError, DuplicateMementoError, type Vault } from './vault/index.js'
+import { StaleMementoError, DuplicateMementoError, ReservedIndexTagError, type Vault } from './vault/index.js'
 import {
   DEFAULT_RECALL_K, DEFAULT_RECENT_LIMIT, DEFAULT_SEARCH_CONTEXT_CHARS,
   MIN_LITERAL_QUERY_CHARS, SEARCH_MAX_SNIPPETS,
@@ -60,7 +60,7 @@ export function createMcpServer(
   server.registerTool(
     'write_memento',
     {
-      description: 'Store a new memento (memory) in the vault. Use for facts worth keeping across sessions: user preferences, architectural decisions, project conventions, mistakes to avoid. One clear fact per memento. Avoid writing transient or conversation-specific things. If a similar memento already exists the tool will warn you — use update_memento instead.',
+      description: 'Store a new memento (memory) in the vault. Use for facts worth keeping across sessions: user preferences, architectural decisions, project conventions, mistakes to avoid. One clear fact per memento. Avoid writing transient or conversation-specific things. If a similar memento already exists the tool will warn you — use update_memento instead. Call get_tags first and prefer existing tags over inventing new ones.',
       inputSchema: {
         text: z.string().describe('The memento text. Be specific and self-contained.'),
         tags: z.array(z.string()).optional().describe('Topic tags for filtering, e.g. ["coding", "architecture"]'),
@@ -72,7 +72,8 @@ export function createMcpServer(
       } catch (e) {
         // A duplicate is an expected, recoverable outcome — return its guidance as normal
         // content so the AI reads it and switches to update_memento (same as the stale path).
-        if (e instanceof DuplicateMementoError) {
+        // ReservedIndexTagError is the same shape: the AI must update the existing index.
+        if (e instanceof DuplicateMementoError || e instanceof ReservedIndexTagError) {
           return { content: [{ type: 'text', text: e.message }] }
         }
         throw e
@@ -150,6 +151,35 @@ export function createMcpServer(
   )
 
   server.registerTool(
+    'get_memory_index',
+    {
+      description: 'Read the curated memory-index memento — your top-level summary of this vault, maintained by you across sessions. The auto-loaded session-start prelude includes its body; call this only when you need to re-read it later in the conversation (e.g. before deciding what to update). Returns the body text — pass new text to update_memory_index to revise it; the index id is resolved internally.',
+      inputSchema: {},
+      annotations: { readOnlyHint: true },
+    },
+    async () => {
+      const entry = await vault.getIndexEntry()
+      const text = entry
+        ? entry.text
+        : 'No memory index yet — call update_memory_index(<text>) to create one. Keep it under ~30 lines; use it to surface high-signal facts (user preferences, project state, decisions) you would otherwise have to recall every session.'
+      return { content: [{ type: 'text', text }] }
+    },
+  )
+
+  server.registerTool(
+    'update_memory_index',
+    {
+      description: 'Replace the body of the curated memory-index memento. Use to revise the vault\'s top-level summary as durable knowledge accumulates (after writing 2–3 related mementos, after deleting a memento the index covered, when an entry has gone stale). Keep the body under ~30 lines — the index is signal, not history. There is only one index memento; the id is resolved internally so you do not need to track it.',
+      inputSchema: {
+        text: z.string().describe('The full new body for the memory index. Replaces the previous text in its entirety — include everything you want to keep.'),
+      },
+    },
+    async ({ text }) => ({
+      content: [{ type: 'text', text: renderUpdate(await vault.updateIndex(text)) }],
+    }),
+  )
+
+  server.registerTool(
     'get_memento',
     {
       description: 'Return the full text of one memento by id. recall shows only the best-matching chunk of a long memento and notes "(matched chunk N/M)" — pass that memento id here to read the whole thing.',
@@ -193,6 +223,9 @@ export function createMcpServer(
       inputSchema: {
         memento_id: z.string().describe('Memento id to delete'),
       },
+      // MCP clients use these hints to flag the call to the user (e.g. an "are you sure?"
+      // confirmation) and to skip safety wrappers on read-only ops.
+      annotations: { destructiveHint: true, idempotentHint: false },
     },
     async ({ memento_id }) => {
       await vault.deleteMemento(memento_id)
@@ -201,29 +234,13 @@ export function createMcpServer(
   )
 
   server.registerTool(
-    'get_recent_mementos',
+    'list_mementos',
     {
-      description: 'Return the most recently-active mementos in reverse chronological order — ranked by last-update time, so a memento edited today sorts to the top even if first written long ago. Use at the start of a session to recap what was last on your mind, or when you need to find a memento you touched recently but cannot remember its content. Prefer recall when you have a specific topic in mind — recency alone is rarely the right ranking.',
+      description: 'List mementos in reverse-chronological order by last-update time, optionally bounded by a date window and/or ranked by a query. With no params: the k most-recently-touched mementos overall (use at session start to recap what was last on your mind). With `start`/`end`: useful for "what did we work on last week?" or "summarise everything from March." With `query`: results are ranked by semantic relevance instead of recency. Dates are ISO 8601 (e.g. "2026-05-01" or "2026-05-13T18:00:00Z"); a date-only `end` covers the whole day. Prefer recall when you have a specific topic in mind and no date bound — pure recency rarely beats semantic ranking.',
       inputSchema: {
-        limit: z.number().int().positive().max(MAX_RECENT_LIMIT).default(DEFAULT_RECENT_LIMIT).describe(`How many recent mementos to return (default ${DEFAULT_RECENT_LIMIT}, max ${MAX_RECENT_LIMIT})`),
-      },
-    },
-    async ({ limit }) => ({
-      content: [{
-        type: 'text',
-        text: renderMementoList(await vault.getRecentMementos(limit), 'No memories stored.'),
-      }],
-    }),
-  )
-
-  server.registerTool(
-    'get_mementos_in_range',
-    {
-      description: 'Find mementos active inside a date window — matched on last-update time, so a memory edited in the window counts even if first written earlier. Useful for "what did we work on last week?" or "summarise everything I touched in March." Either end of the range is optional. If `query` is supplied, results within the range are semantically ranked by it; otherwise the most-recently-updated matches are returned in reverse chronological order. Dates are ISO 8601 strings (e.g. "2026-05-01" or "2026-05-13T18:00:00Z").',
-      inputSchema: {
-        start: z.string().optional().describe('Lower bound, inclusive. ISO 8601 date or datetime. Omit for "everything up to end".'),
-        end: z.string().optional().describe('Upper bound, inclusive. ISO 8601 date or datetime. A date-only end (YYYY-MM-DD) covers the whole day; a datetime end is matched to the exact instant. Omit for "everything since start".'),
-        query: z.string().optional().describe('Optional natural-language query — when present, results are ranked by relevance to it.'),
+        start: z.string().optional().describe('Lower bound, inclusive. ISO 8601 date or datetime. Omit to allow any.'),
+        end: z.string().optional().describe('Upper bound, inclusive. ISO 8601 date or datetime. Omit to allow any.'),
+        query: z.string().optional().describe('Optional natural-language query — when present, results are ranked by relevance to it instead of recency.'),
         k: z.number().int().positive().max(MAX_RECENT_LIMIT).default(DEFAULT_RECENT_LIMIT).describe(`Max results to return (default ${DEFAULT_RECENT_LIMIT}, max ${MAX_RECENT_LIMIT})`),
       },
     },
@@ -232,7 +249,7 @@ export function createMcpServer(
         type: 'text',
         text: renderMementoList(
           await vault.getMementosInRange(start, end, query, k),
-          'No mementos found in that date range.',
+          start || end ? 'No mementos found in that date range.' : 'No memories stored.',
         ),
       }],
     }),

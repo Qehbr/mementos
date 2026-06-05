@@ -78,6 +78,32 @@ Prefer these standard tags when they fit. Only invent new ones when none of thes
 
 A memento may carry multiple tags. Combine them: \`["user", "preference"]\`, \`["decision", "project:foo"]\`.
 
+## The memory index
+
+The vault keeps ONE curated summary memento — your top-level view of what's in
+this vault. The session-start hook loads it once per conversation under a
+\`[MEMORY-INDEX]\` heading; you can re-read it any time with \`get_memory_index\`
+and revise it with \`update_memory_index(text)\`. The id is resolved internally —
+you never have to track it.
+
+Format the body as a flat list — one durable fact per line, optionally with the
+memento id when an entry points at a specific memento:
+
+  - user: prefers tabs over spaces
+  - project: mementos v1.0.1 published; next is the SessionStart hook work
+  - decision: chose hybrid retriever over pure semantic — see <memento-id>
+  - reference: bug board in Linear "INGEST"
+
+When to update:
+- After writing 2-3 related mementos, revise the index entry(s) that cover them.
+- When a covered memento is deleted or its content shifts substantially.
+- Keep it tight: never past ~30 lines. Compact entries that have stopped earning
+  their slot — the index is signal, not history.
+
+When NOT to update:
+- For transient facts ("user is currently debugging X") — never go in the index.
+- For one-off context you'd not write a memento for at all.
+
 ## Tags that mark a memento's origin
 
 Mementos carry an auto-applied \`source:*\` tag when they came from somewhere other than your own \`write_memento\` calls during a live chat — the tag names the tool whose transcript was ingested or auto-snapshotted (for example \`source:claude-code\`, \`source:openclaw\`).
@@ -119,8 +145,9 @@ edited it first. Call get_memento again, re-apply your change to the current tex
 - \`delete_memento(memento_id)\` — delete one memento
 - \`get_chronicle(chronicle_id)\` — read a whole past conversation in order
 - \`list_chronicles()\` — list all imported conversations
-- \`get_recent_mementos(limit?)\` — most recently written mementos
-- \`get_mementos_in_range(start?, end?, query?, k?)\` — mementos in a date window
+- \`list_mementos(start?, end?, query?, k?)\` — list mementos by recency, optionally bounded by a date window and/or ranked by a query (no args = most recent)
+- \`get_memory_index()\` — re-read the curated index memento
+- \`update_memory_index(text)\` — revise the curated index memento (id is internal)
 - \`sync()\` — pull the latest memories from storage now; call only when the user insists a memento exists but recall came up empty (it may have been written on another device)
 `
 

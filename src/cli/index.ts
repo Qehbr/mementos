@@ -12,7 +12,7 @@
  * at runtime to find what's available.
  */
 import { runInit } from './commands/init.js'
-import { runServe, runRetrieve, runList, runGet, runDelete, runSync, runSearch } from './commands/runtime.js'
+import { runServe, runRetrieve, runSessionStart, runList, runGet, runDelete, runSync, runSearch } from './commands/runtime.js'
 import { runIntegration } from './commands/admin.js'
 import { runShareKey } from './commands/share-key.js'
 import { runDestroy } from './commands/destroy.js'
@@ -41,6 +41,7 @@ switch (command) {
   case 'init':        await runInit(); break
   case 'serve':       await runServe(); break
   case 'retrieve':    await runRetrieve(); break
+  case 'session-start': await runSessionStart(); break
   case 'list':        await runList(subcommand, args); break
   case 'get':         await runGet(subcommand); break
   case 'delete':      await runDelete(subcommand); break

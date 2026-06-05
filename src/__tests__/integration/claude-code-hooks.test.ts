@@ -1,5 +1,6 @@
 /**
- * Hook plumbing for ClaudeCodeIntegration — both kinds today: auto-retrieve and pre-compact.
+ * Hook plumbing for ClaudeCodeIntegration — three kinds today: auto-retrieve,
+ * session-start, and pre-compact.
  *
  * We exercise the class directly (no `claude mcp` subprocess, no init flow). Each hook
  * lives in `~/.claude/settings.json` under its Claude-Code-side event name; this test
@@ -11,7 +12,7 @@ import { readFile, mkdir } from 'node:fs/promises'
 import { join } from 'node:path'
 import { setupTestEnv, type IntegrationContext } from './_helpers.js'
 
-describe('ClaudeCodeIntegration hooks (auto-retrieve + pre-compact)', () => {
+describe('ClaudeCodeIntegration hooks (auto-retrieve + session-start + pre-compact)', () => {
   let ctx: IntegrationContext
 
   beforeEach(async () => {
@@ -38,6 +39,20 @@ describe('ClaudeCodeIntegration hooks (auto-retrieve + pre-compact)', () => {
     expect(hooks.PreCompact).toBeUndefined()
     expect(await integ.hooks.isHookEnabled('auto-retrieve')).toBe(true)
     expect(await integ.hooks.isHookEnabled('pre-compact')).toBe(false)
+  })
+
+  it('enableHook(session-start) writes a SessionStart entry with `mementos session-start`', async () => {
+    const { ClaudeCodeIntegration } = await import('../../integrations/claude-code/index.js')
+    const integ = new ClaudeCodeIntegration()
+    await integ.hooks.enableHook('session-start')
+
+    const settings = await readSettings()
+    const hooks = settings.hooks as Record<string, Array<{ hooks?: Array<{ command?: string }> }>>
+    expect(hooks.SessionStart).toBeDefined()
+    expect(hooks.SessionStart[0].hooks?.[0].command).toBe('mementos session-start')
+    expect(hooks.UserPromptSubmit).toBeUndefined()
+    expect(hooks.PreCompact).toBeUndefined()
+    expect(await integ.hooks.isHookEnabled('session-start')).toBe(true)
   })
 
   it('enableHook(pre-compact) writes a PreCompact entry with `mementos snapshot`', async () => {

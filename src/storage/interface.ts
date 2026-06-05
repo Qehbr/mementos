@@ -85,6 +85,34 @@ export interface StorageBackend {
   describeStoredData(): Promise<string>
 
   /**
+   * Lines of manual-removal instructions printed by `mementos destroy` and migrate
+   * abort. Backends with off-machine state (a git remote, a cloud bucket) extend
+   * the local `rm -rf` recipe with the corresponding remote-side step so the user
+   * isn't misled into thinking a local delete wiped their data. The
+   * `localPath` argument is the vault path on this machine — backends use it
+   * verbatim in their local-side instructions.
+   *
+   * Default implementations exist on backends that have nothing extra to say
+   * beyond "rm -rf <path>"; the caller renders the lines as-is.
+   */
+  describeManualRemoval(localPath: string): string[]
+
+  /**
+   * Optional: per-backend cleanup performed by `mementos destroy` when the user
+   * removes the machine config. Examples: deleting a per-vault SSH key that
+   * mementos auto-generated (only when WE generated it — user-supplied keys
+   * stay). Default = no-op for backends with nothing extra to clean.
+   */
+  cleanupOnDestroy?(print: (msg: string) => void): Promise<void>
+
+  /**
+   * Optional: backend-specific recovery hint shown by `mementos doctor` when a
+   * read against this backend fails. The doctor falls back to a generic
+   * filesystem-permissions message when this is absent.
+   */
+  describeDoctorHint?(): string
+
+  /**
    * Apply `transformFn` to every `.mem` file in the vault, atomically per file.
    *
    * Used by `mementos migrate` to transform vault contents (key rotation, embedder

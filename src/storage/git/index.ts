@@ -545,6 +545,35 @@ export class GitBackend implements StorageBackend {
     return `${base} (git clone at ${this.config.localPath}, remote: ${this.config.remoteUrl})`
   }
 
+  describeManualRemoval(localPath: string): string[] {
+    return [
+      'To delete it permanently you must remove BOTH locations:',
+      `  Local clone:  rm -rf ${localPath}`,
+      `  Git remote:   delete ${this.config.remoteUrl} via your git host`,
+      '                — `rm -rf` does NOT touch the remote, and any other device',
+      '                  paired to this vault still has full read access.',
+    ]
+  }
+
+  describeDoctorHint(): string {
+    return 'Verify the git remote is reachable and you have credentials.'
+  }
+
+  /**
+   * On destroy: remove the per-vault SSH key only when WE generated it — i.e. the
+   * path matches `defaultSshKeyPath(remote)` for the configured remote. A user-
+   * supplied existing key (via `--git-ssh-key=<path>`) is left alone; we never
+   * touch keys we didn't generate.
+   */
+  async cleanupOnDestroy(print: (msg: string) => void): Promise<void> {
+    const sshKeyPath = this.config.sshKeyPath
+    if (!sshKeyPath) return
+    if (sshKeyPath !== defaultSshKeyPath(this.config.remoteUrl)) return  // user-owned key — skip
+    await safeUnlink(sshKeyPath)
+    await safeUnlink(`${sshKeyPath}.pub`)
+    print(`Removed SSH key: ${sshKeyPath} (+ .pub)`)
+  }
+
   /**
    * Staged file-transform (via the shared two-phase rename) plus one commit+push for the
    * whole batch — only one network round-trip regardless of file count.

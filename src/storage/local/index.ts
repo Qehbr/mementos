@@ -11,6 +11,7 @@ import { join } from 'node:path'
 import type { StorageBackend, FileStat } from '../interface.js'
 import type { MachineConfig } from '../../core/types.js'
 import type { StorageImplementationModule } from '../registry.js'
+import type { InitContext } from '../../core/init-context/interface.js'
 import { assertIfMatch } from '../_utils/check-if-match.js'
 import { summarizeMemDir } from '../_utils/data-summary.js'
 import { safeUnlink, pathExists } from '../../core/_utils/fs.js'
@@ -24,7 +25,19 @@ export const type = 'local'
 export function create(machine: MachineConfig): StorageBackend {
   return new LocalBackend(machine.vaultPath)
 }
-const _shape: StorageImplementationModule = { type, create }
+
+/** Selection-time tip — fires in `mementos init` right after the user picks this
+ *  backend. Surfaces the OS-sync-folder pattern as the lightweight alternative
+ *  to setting up git when cross-device sync is wanted. */
+export function describeSelectionTip(ctx: InitContext): void {
+  ctx.print('')
+  ctx.print('Tip: for cloud sync without setting up git, point the vault path at a folder')
+  ctx.print('inside an OS sync client (Google Drive, Dropbox, iCloud). The sync daemon')
+  ctx.print('handles transfer transparently — mementos just reads and writes files.')
+  ctx.print('')
+}
+
+const _shape: StorageImplementationModule = { type, create, describeSelectionTip }
 
 export class LocalBackend implements StorageBackend {
   constructor(private readonly vaultPath: string) {}
@@ -89,6 +102,13 @@ export class LocalBackend implements StorageBackend {
 
   async describeStoredData(): Promise<string> {
     return summarizeMemDir(this.vaultPath)
+  }
+
+  describeManualRemoval(localPath: string): string[] {
+    return [
+      'To delete it permanently:',
+      `  rm -rf ${localPath}`,
+    ]
   }
 
   /** `commitMessage` is unused — LocalBackend has no commit log. */

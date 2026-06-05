@@ -8,7 +8,7 @@ import { join } from 'node:path'
 import { homedir } from 'node:os'
 import { cliRunner, probeCli } from '../_utils/cli-runner.js'
 import type { ClientIntegration } from '../interface.js'
-import { MCP_SERVER_COMMAND, AUTO_RETRIEVE_COMMAND } from '../interface.js'
+import { MCP_SERVER_COMMAND, AUTO_RETRIEVE_COMMAND, SESSION_START_COMMAND } from '../interface.js'
 import type { IntegrationImplementationModule } from '../registry.js'
 import type { InitContext } from '../../core/init-context/interface.js'
 import { resolveYesNo, promptHookToggle, promptAutoRetrieveHook } from '../_utils/prompt.js'
@@ -91,6 +91,14 @@ export class ClaudeCodeIntegration implements ClientIntegration {
     await promptAutoRetrieveHook(ctx, this, type,
       'Enable auto-retrieval hook? (pre-injects memories before every message; costs tokens on trivial turns)')
     await promptHookToggle({
+      ctx, flag: `${type}-hook-session-start`, label: 'Session-start hook',
+      integration: 'claude-code', kind: 'session-start',
+      current: await this.hooks.isHookEnabled('session-start'),
+      promptText: 'Enable session-start hook? (loads the curated memory index ONCE at conversation start so you do not have to recall it; cheap.)',
+      enable: () => this.hooks.enableHook('session-start'),
+      disable: () => this.hooks.disableHook('session-start'),
+    })
+    await promptHookToggle({
       ctx, flag: `${type}-hook-pre-compact`, label: 'Pre-compact hook',
       integration: 'claude-code', kind: 'pre-compact',
       current: await this.hooks.isHookEnabled('pre-compact'),
@@ -146,6 +154,11 @@ export class ClaudeCodeIntegration implements ClientIntegration {
       event: 'UserPromptSubmit',
       command: AUTO_RETRIEVE_COMMAND,
       baseCommand: AUTO_RETRIEVE_COMMAND,
+    },
+    'session-start': {
+      event: 'SessionStart',
+      command: SESSION_START_COMMAND,
+      baseCommand: SESSION_START_COMMAND,
     },
     'pre-compact': {
       event: 'PreCompact',

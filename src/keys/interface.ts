@@ -80,6 +80,20 @@ export interface KeyProvider {
   describeStoredKey(): string
 
   /**
+   * One-line summary of where this provider's key lives, in `mementos doctor`
+   * output (slightly different framing than `describeStoredKey` — fits the
+   * doctor's `Key: <where>` row). Default = provider type name (so a new
+   * provider gets a usable but generic line for free).
+   */
+  describeKeyLocation?(): string
+
+  /**
+   * Optional: provider-specific recovery hint shown by `mementos doctor` when a
+   * key read fails. Default = generic re-init warning.
+   */
+  describeDoctorHint?(): string
+
+  /**
    * Persist 32 bytes of entropy as this provider's vault key. Shared by both setup
    * paths:
    *   - `setupAtInit` calls this with freshly-generated entropy on new-vault init

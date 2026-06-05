@@ -22,7 +22,6 @@ import { loadEmbedders } from '../../embeddings/registry.js'
 import { reEncryptMem, canDecryptMem } from '../../core/vault/re-encrypt.js'
 import { encrypt } from '../../core/vault/crypto.js'
 import { memAad, decryptMemChunks } from '../../core/vault/aad.js'
-import { tryReadGitConfig } from '../../storage/git/index.js'
 import { deriveKeyFromEntropy } from '../../keys/_utils/derivation/index.js'
 import { safeUnlink } from '../../core/_utils/fs.js'
 import { assertNoServerRunning } from '../_utils/assert-no-server.js'
@@ -503,10 +502,10 @@ async function doStorageCopy(ctx: CliInitContext, source: MachineConfig, target:
 
   ctx.print('\nMigration complete.')
   ctx.print(`Old vault data is at ${source.vaultPath} — delete it manually once the new backend is confirmed working.`)
-  if (source.backend === 'git') {
-    const { remote } = tryReadGitConfig(source.backendConfig)
-    if (remote) ctx.print(`The old git remote at ${remote} is also untouched.`)
-  }
+  // Backend-specific reminder: git's remote is a separate destruction decision.
+  // Each backend's describeManualRemoval enumerates the lines; we render them as
+  // post-migrate notes so the user knows what still has copies.
+  for (const line of sourceBackend.describeManualRemoval(source.vaultPath)) ctx.print(`  ${line}`)
 }
 
 /**
@@ -596,10 +595,17 @@ async function doAbort(
       ctx.print(`Aborting storage migration — removing ${manifest.targetVaultPath}.`)
       ctx.print(`(Source vault is untouched.)`)
       await rm(manifest.targetVaultPath, { recursive: true, force: true })
-      const { remote: gitRemote } = tryReadGitConfig(manifest.targetBackendConfig)
-      if (manifest.targetBackend === 'git' && gitRemote) {
-        ctx.print(`The git remote ${gitRemote} was NOT touched. Delete it manually via your git host if desired.`)
+      // Per-backend reminder of state we DIDN'T touch (e.g. a git remote stays).
+      // Build a target-shaped MachineConfig just to instantiate the backend so we
+      // can ask it for its own removal recipe — keeps the special-case out of here.
+      const targetCfg: MachineConfig = {
+        backend: manifest.targetBackend,
+        backendConfig: manifest.targetBackendConfig,
+        vaultPath: manifest.targetVaultPath,
+        ...(machine ? { keyProvider: machine.keyProvider, retriever: machine.retriever, searcher: machine.searcher, vectorIndex: machine.vectorIndex } : {}),
       }
+      const targetBackendForRecipe = await buildStorageBackend(targetCfg)
+      for (const line of targetBackendForRecipe.describeManualRemoval(manifest.targetVaultPath)) ctx.print(`  ${line}`)
       break
     }
     case 'key': {

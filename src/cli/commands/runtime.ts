@@ -13,6 +13,7 @@ import { buildVault, withVault } from '../_utils/vault.js'
 import { parseFlag } from '../_utils/flags.js'
 import { registerServe } from '../_utils/serve-registry.js'
 import { logRetrieveFailure } from '../_utils/retrieve-log.js'
+import { loadOutputAdapters } from '../../output-adapters/registry.js'
 import { readMachineConfig } from '../../core/config.js'
 import { DEFAULT_RECALL_K, DEFAULT_SEARCH_CONTEXT_CHARS } from '../../core/vault/constants.js'
 
@@ -66,6 +67,29 @@ function installShutdownHandlers(vault: Vault): void {
 }
 
 /**
+ * Hook entry point for SessionStart. Seeds the `_index` memento if missing,
+ * then emits its body as a `[MEMORY-INDEX]` prelude — once per conversation,
+ * not per user message. Auto-retrieve handles the per-message recall path.
+ *
+ * Quiet on error (same fail-silent policy as `runRetrieve`): a broken hook
+ * must not block the user's chat. Debug log is gated on MEMENTOS_DEBUG.
+ */
+export async function runSessionStart(): Promise<void> {
+  let vault: Awaited<ReturnType<typeof buildVault>> | null = null
+  try {
+    vault = await buildVault()
+    await vault.startup()
+    await vault.seedIndexIfMissing()
+    const text = await vault.getIndexText()
+    if (text) process.stdout.write(await formatRetrieval(`[MEMORY-INDEX]\n${text}`))
+  } catch (e) {
+    if (process.env['MEMENTOS_DEBUG']) await logRetrieveFailure(e)
+  } finally {
+    if (vault) await vault.close().catch(() => { /* fail-silent hook */ })
+  }
+}
+
+/**
  * Hook entry point. Reads the user's message from stdin, runs one recall, writes results
  * to stdout. Exits silently on any error (debug log only with MEMENTOS_DEBUG) so a broken
  * hook can never interrupt the user's conversation.
@@ -79,7 +103,7 @@ export async function runRetrieve(): Promise<void> {
     vault = await buildVault()
     await vault.startup()
     const results = await vault.recall(query, DEFAULT_RECALL_K)
-    if (results.length > 0) process.stdout.write(formatRetrieval(renderRecall(results)))
+    if (results.length > 0) process.stdout.write(await formatRetrieval(renderRecall(results)))
   } catch (e) {
     if (process.env['MEMENTOS_DEBUG']) await logRetrieveFailure(e)
   } finally {
@@ -88,6 +112,7 @@ export async function runRetrieve(): Promise<void> {
     if (vault) await vault.close().catch(() => { /* fail-silent hook */ })
   }
 }
+
 
 export async function runList(subcommand: string | undefined, args: string[]): Promise<void> {
   await withVault(async vault => {
@@ -190,17 +215,20 @@ export async function runSearch(subcommand: string | undefined, args: string[]):
 // ─── retrieve helpers (private — only used by runRetrieve) ───────────────────
 
 /**
- * Wrap retrieved memories in whatever envelope the hook's client expects.
- * `--format=gemini` → Gemini CLI's `hookSpecificOutput.additionalContext` JSON object;
- * anything else (the default) → plain text, which Claude Code and Codex inject as-is.
+ * Wrap hook output in whatever envelope the firing client expects. Adapter is
+ * selected via `--output-adapter=<name>` and resolved through the auto-discovered
+ * `src/output-adapters/` registry — client-specific envelope details live in each
+ * adapter module, NOT here. `--hook-event=<event>` and any other `--hook-*` flag
+ * flows through as `params` for adapters that need them. No adapter selected (or
+ * an unknown one) = plain text + newline, the default Claude Code / Codex use.
  */
-function formatRetrieval(memories: string): string {
-  if (parseFlag('format') === 'gemini') {
-    return JSON.stringify({
-      hookSpecificOutput: { hookEventName: 'BeforeAgent', additionalContext: memories },
-    })
-  }
-  return memories + '\n'
+async function formatRetrieval(memories: string): Promise<string> {
+  const adapterName = parseFlag('output-adapter')
+  if (!adapterName) return memories + '\n'
+  const registry = await loadOutputAdapters()
+  const impl = registry.get(adapterName)
+  if (!impl) return memories + '\n'  // unknown adapter → fail-soft to plain text
+  return impl.create().wrap(memories, { event: parseFlag('hook-event') ?? '' })
 }
 
 function extractQuery(raw: string): string {

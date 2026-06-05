@@ -9,6 +9,7 @@ import { FakeEmbedder, BruteForceIndex, FAKE_DIMS } from './helpers/fake.js'
 import { SemanticRetriever } from '../retrievers/semantic/index.js'
 import { ScanSearcher } from '../searchers/scan/index.js'
 import { CHUNK_CHAR_LIMIT } from '../core/vault/chunker.js'
+import { INDEX_TAG, INDEX_SEED_TEXT } from '../core/vault/constants.js'
 import { renderRecall } from '../core/render.js'
 
 /**
@@ -501,6 +502,52 @@ describe('chunked mementos', () => {
     const items = await vault.listMementos()
     expect(items).toHaveLength(1)
     expect(items[0].chunkCount).toBeGreaterThan(1)
+  })
+})
+
+// ─── Curated memory-index memento (the `_index` tag) ─────────────────────────
+
+describe('memory-index memento', () => {
+  it('seedIndexIfMissing creates exactly one _index memento on an empty vault', async () => {
+    expect(await vault.listMementos([INDEX_TAG])).toEqual([])
+    await vault.seedIndexIfMissing()
+    const seeded = await vault.listMementos([INDEX_TAG])
+    expect(seeded).toHaveLength(1)
+    expect(seeded[0].tags).toContain(INDEX_TAG)
+  })
+
+  it('seedIndexIfMissing is a no-op when an _index memento already exists', async () => {
+    await vault.seedIndexIfMissing()
+    await vault.seedIndexIfMissing()
+    await vault.seedIndexIfMissing()
+    expect(await vault.listMementos([INDEX_TAG])).toHaveLength(1)
+  })
+
+  it('getIndexText returns null on a fresh vault and the seed body once seeded', async () => {
+    expect(await vault.getIndexText()).toBeNull()
+    await vault.seedIndexIfMissing()
+    expect(await vault.getIndexText()).toBe(INDEX_SEED_TEXT)
+  })
+
+  it('writeMemento rejects a second _index with ReservedIndexTagError naming the existing id', async () => {
+    const first = await vault.writeMemento({ text: 'index v1', tags: [INDEX_TAG] })
+    await expect(vault.writeMemento({ text: 'index v2', tags: [INDEX_TAG] }))
+      .rejects.toThrow(new RegExp(`_index.*update_memento\\('${first.id}'\\)`))
+  })
+
+  it('update_memento on the index revises its text without a second memento appearing', async () => {
+    const first = await vault.writeMemento({ text: 'initial index', tags: [INDEX_TAG] })
+    await vault.updateMemento(first.id, 'revised index')
+    expect(await vault.listMementos([INDEX_TAG])).toHaveLength(1)
+    expect(await vault.getIndexText()).toBe('revised index')
+  })
+
+  it('after deleting the _index, writeMemento with the tag is allowed again', async () => {
+    const first = await vault.writeMemento({ text: 'orig', tags: [INDEX_TAG] })
+    await vault.deleteMemento(first.id)
+    const second = await vault.writeMemento({ text: 'rebuilt', tags: [INDEX_TAG] })
+    expect(second.id).not.toBe(first.id)
+    expect(await vault.getIndexText()).toBe('rebuilt')
   })
 })
 

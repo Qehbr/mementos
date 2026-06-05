@@ -31,7 +31,20 @@ export async function setupAtInit(ctx: InitContext): Promise<void> {
     ctx.warn('You will see errors at startup if it is unset when mementos serve runs.')
   }
 }
-const _shape: EmbedderImplementationModule = { type, create, setupAtInit }
+
+/** Selection-time warning — mementos's headline is end-to-end encryption, but
+ *  this embedder sends raw memento text to OpenAI's API. Users picking openai
+ *  to "get better recall" without reading the README would silently forfeit the
+ *  property they came for. Surface the trade-off at the moment of decision. */
+export function describeSelectionTip(ctx: InitContext): void {
+  ctx.print('')
+  ctx.print('Note: the openai embedder sends every memento\'s text to OpenAI\'s API for embedding.')
+  ctx.print('Encryption protects data AT REST in the vault, but NOT this network call.')
+  ctx.print('For full end-to-end privacy, re-run init with --embedder=minilm.')
+  ctx.print('')
+}
+
+const _shape: EmbedderImplementationModule = { type, create, setupAtInit, describeSelectionTip }
 
 export class OpenAIEmbedder implements EmbeddingProvider {
   readonly dimensions: number

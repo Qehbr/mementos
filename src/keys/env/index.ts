@@ -77,6 +77,14 @@ export class EnvKeyProvider implements KeyProvider {
     return `${this.envVar} environment variable (set in your shell)`
   }
 
+  describeKeyLocation(): string {
+    return `${this.envVar} environment variable`
+  }
+
+  describeDoctorHint(): string {
+    return `Set ${this.envVar} in this shell (and any env where mementos runs).`
+  }
+
   async isAlreadyConfigured(): Promise<boolean> {
     return !!process.env[this.envVar]
   }

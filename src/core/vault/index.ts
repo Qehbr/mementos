@@ -28,6 +28,7 @@ import {
   RECALL_OVERFETCH_MULT, RECALL_OVERFETCH_FLOOR,
   SEARCH_MAX_PER_MEMENTO, SEARCH_MAX_SNIPPETS, CACHE_FLUSH_INTERVAL_MS,
   MIN_LITERAL_QUERY_CHARS,
+  INDEX_TAG, INDEX_SEED_TEXT,
 } from './constants.js'
 import { randomUUID } from 'node:crypto'
 import { validateId, idFromMemFilename } from './constants.js'
@@ -80,6 +81,22 @@ export class StaleMementoError extends Error {
 export class DuplicateMementoError extends Error {
   readonly name = 'DuplicateMementoError'
   constructor(message: string) { super(message) }
+}
+
+/**
+ * Thrown when a write_memento call attempts to create a second memento with the
+ * reserved `_index` tag. The vault holds exactly one canonical index memento;
+ * the AI updates it via `update_memento(<existing id>)`. The error message
+ * surfaces the existing id so the AI can pivot in one round-trip.
+ */
+export class ReservedIndexTagError extends Error {
+  readonly name = 'ReservedIndexTagError'
+  constructor(existingId: string) {
+    super(
+      `The '${INDEX_TAG}' tag is reserved for the single memory-index memento. ` +
+      `Use update_memento('${existingId}') to revise the existing index instead.`,
+    )
+  }
 }
 
 /** What one reconcile pass changed — returned by `Vault.sync()`. */
@@ -483,6 +500,15 @@ export class Vault {
     const texts = this.splitChunks(memory.text)
     if (texts.length === 0) throw new Error('Cannot write an empty memory')
 
+    // Reserved-index guard: at most one memento ever carries the `_index` tag.
+    // Allow the write only if none exists (covers the seed path + deleted-and-recreate
+    // edge case). When one already exists, reject with the existing id so the AI's
+    // next call is `update_memento(<that id>)`.
+    if (memory.tags?.includes(INDEX_TAG)) {
+      const existingId = this.findIndexMementoId()
+      if (existingId) throw new ReservedIndexTagError(existingId)
+    }
+
     const vectors = await this.deps.embedder.embedBatch(texts)
 
     // Dedup uses just the first chunk: inner chunks share content with their siblings by
@@ -793,6 +819,53 @@ export class Vault {
     }
   }
 
+  /**
+   * Read the canonical memory-index memento's text — the auto-retrieve hook
+   * prepends this to its output every turn so the AI always sees the curated
+   * vault summary. Returns null when no index exists (lazy-seed hasn't run yet
+   * or the AI deleted it); the hook then omits the prelude entirely rather
+   * than synthesise a placeholder.
+   */
+  async getIndexText(): Promise<string | null> {
+    const id = this.findIndexMementoId()
+    if (!id) return null
+    const detail = await this.getMemento(id)
+    return detail?.text ?? null
+  }
+
+  /**
+   * Lazy seed for the `_index` memento. Called by the session-start hook (not
+   * startup) — that way unit tests over the Vault class see an empty vault by
+   * default and only production paths through the hook create the placeholder.
+   * Best-effort: a failed seed (e.g. embedder offline on first run) leaves the
+   * index empty for that turn and gets retried next call.
+   */
+  async seedIndexIfMissing(): Promise<void> {
+    if (this.findIndexMementoId()) return
+    await this.writeMemento({ text: INDEX_SEED_TEXT, tags: [INDEX_TAG] })
+      .catch(() => { /* fail-silent: index is best-effort, not load-bearing */ })
+  }
+
+  /** Read the `_index` memento as `{id, text}` for the dedicated MCP tool.
+   *  Returns null when no index exists — caller seeds via `seedIndexIfMissing`
+   *  and re-reads. Kept separate from `getMemento(id)` so the AI never has to
+   *  know the index's id. */
+  async getIndexEntry(): Promise<{ id: string; text: string } | null> {
+    const id = this.findIndexMementoId()
+    if (!id) return null
+    const detail = await this.getMemento(id)
+    return detail ? { id, text: detail.text } : null
+  }
+
+  /** Replace the `_index` memento's text. Seeds a new one if none exists yet.
+   *  Backs the `update_memory_index` MCP tool — the AI passes only the new
+   *  text; the id is resolved internally. */
+  async updateIndex(text: string): Promise<WriteOutcome> {
+    const existing = this.findIndexMementoId()
+    if (existing) return this.updateMemento(existing, text)
+    return this.writeMemento({ text, tags: [INDEX_TAG] })
+  }
+
   /** A memento's full text = its chunks joined by a single space. The one reconstruction
    *  rule shared by every display read (get_memento / get_chronicle / recent / range), so
    *  the same memento renders identically through any endpoint. (The searcher index joins
@@ -961,6 +1034,17 @@ export class Vault {
    * Reject a write whose first chunk is closer than the duplicate threshold to any
    * existing chunk. Returns a user-facing message, or null when the write is clear.
    */
+  /** Locate the single canonical `_index` memento by tag. Returns null when none
+   *  exists — startup() and the writeMemento guard both rely on this. Defensive:
+   *  if multiple ever leak past the guard (e.g. cross-device race), returns the
+   *  lowest id so the AI's update call is at least deterministic. */
+  private findIndexMementoId(): string | null {
+    const ids = [...this.metaById.idsMatchingFilter({ tags: [INDEX_TAG] })]
+    if (ids.length === 0) return null
+    ids.sort()
+    return ids[0]
+  }
+
   private findDuplicate(vector: Float32Array): string | null {
     if (this.deps.index.size === 0) return null
     const results = this.deps.index.search(vector, 1)

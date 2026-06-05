@@ -124,12 +124,12 @@ describe('AntigravityCliIntegration', () => {
   })
 
   // ─── Hooks ────────────────────────────────────────────────────────────────
-  it('supportedHooks reports only auto-retrieve', async () => {
+  it('supportedHooks reports auto-retrieve + session-start', async () => {
     const { AntigravityCliIntegration } = await import('../integrations/antigravity-cli/index.js')
-    expect(new AntigravityCliIntegration().hooks.supportedHooks()).toEqual(['auto-retrieve'])
+    expect(new AntigravityCliIntegration().hooks.supportedHooks()).toEqual(['auto-retrieve', 'session-start'])
   })
 
-  it('enableHook writes a BeforeAgent command hook into plugin.json', async () => {
+  it('enableHook(auto-retrieve) writes a BeforeAgent command hook into plugin.json', async () => {
     const { AntigravityCliIntegration } = await import('../integrations/antigravity-cli/index.js')
     const integ = new AntigravityCliIntegration()
     await integ.install()  // base plugin.json must exist first
@@ -146,10 +146,30 @@ describe('AntigravityCliIntegration', () => {
     expect(manifest.hooks['BeforeAgent']).toEqual([
       {
         matcher: '*',
-        hooks: [{ name: 'mementos-auto-retrieve', type: 'command', command: 'mementos retrieve --format=gemini' }],
+        hooks: [{ name: 'mementos-retrieve', type: 'command', command: 'mementos retrieve --output-adapter=gemini-hook --hook-event=BeforeAgent' }],
       },
     ])
     expect(manifest.name).toBe('mementos')  // plugin metadata preserved
+  })
+
+  it('enableHook(session-start) writes a SessionStart command hook into plugin.json', async () => {
+    const { AntigravityCliIntegration } = await import('../integrations/antigravity-cli/index.js')
+    const integ = new AntigravityCliIntegration()
+    await integ.install()
+
+    await integ.hooks.enableHook('session-start')
+    const manifest = JSON.parse(await readFile(pluginManifestPath(), 'utf8')) as {
+      hooks: Record<string, Array<{ matcher: string; hooks: Array<{ type: string; command: string; name?: string }> }>>
+    }
+    expect(manifest.hooks['SessionStart']).toEqual([
+      {
+        matcher: '*',
+        hooks: [{ name: 'mementos-session-start', type: 'command', command: 'mementos session-start --output-adapter=gemini-hook --hook-event=SessionStart' }],
+      },
+    ])
+    expect(await integ.hooks.isHookEnabled('session-start')).toBe(true)
+    // auto-retrieve event untouched
+    expect(manifest.hooks['BeforeAgent']).toBeUndefined()
   })
 
   it('enableHook on a fresh setup creates a valid plugin.json (name/version present)', async () => {

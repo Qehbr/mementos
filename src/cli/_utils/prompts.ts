@@ -22,6 +22,19 @@ export async function promptChoice<F>(
   ctx: InitContext, label: string, flag: string,
   registry: Map<string, DiscoveredImpl<F>>, defaultType: string,
 ): Promise<string> {
+  const choice = await pickChoice(ctx, label, flag, registry, defaultType)
+  // Selection-time tip — per-impl trade-off surface (e.g. openai's privacy note,
+  // local backend's OS-sync tip). The discovery registry passes the function
+  // through if the impl module exports it; otherwise this is a no-op.
+  const tip = registry.get(choice)?.describeSelectionTip
+  if (typeof tip === 'function') (tip as (c: InitContext) => void)(ctx)
+  return choice
+}
+
+async function pickChoice<F>(
+  ctx: InitContext, label: string, flag: string,
+  registry: Map<string, DiscoveredImpl<F>>, defaultType: string,
+): Promise<string> {
   const fromFlag = ctx.getFlag(flag)
   if (fromFlag !== undefined && fromFlag !== '') return fromFlag
   // No choice to make: auto-pick the only option and tell the user what we did.

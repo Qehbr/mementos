@@ -33,6 +33,15 @@ export interface ImplementationModule<F> {
   type: string
   create: F
   setupAtInit?: (ctx: InitContext) => Promise<void>
+  /**
+   * Optional one-shot text fired IMMEDIATELY after the user picks this
+   * implementation in the init prompt — for surfacing trade-offs at the moment
+   * of decision (e.g. the openai embedder's privacy implications, the local
+   * storage backend's cloud-sync tip). Distinct from `setupAtInit` (which runs
+   * later, after all selections, and does actual setup work). Sync `void` —
+   * just emit lines via `ctx.print`; no I/O.
+   */
+  describeSelectionTip?: (ctx: InitContext) => void
 }
 
 /** Result row for `discoverImplementations` — paired type-string and factory function. */
@@ -46,6 +55,8 @@ export interface DiscoveredImpl<F> {
    * want this generic utility coupled to any one of them.
    */
   setupAtInit?: unknown
+  /** Optional selection-time tip. Signature `(ctx: InitContext) => void`. */
+  describeSelectionTip?: unknown
 }
 
 /**
@@ -86,6 +97,7 @@ export async function discoverImplementations<F>(
       type: mod.type,
       create: mod.create as F,
       setupAtInit: typeof mod.setupAtInit === 'function' ? mod.setupAtInit : undefined,
+      describeSelectionTip: typeof mod.describeSelectionTip === 'function' ? mod.describeSelectionTip : undefined,
     })
   }
 

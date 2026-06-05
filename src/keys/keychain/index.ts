@@ -240,6 +240,14 @@ export class KeychainKeyProvider implements KeyProvider {
     return 'OS keychain entry + chmod-600 fallback file (if present)'
   }
 
+  describeKeyLocation(): string {
+    return 'OS keychain (or chmod-600 fallback)'
+  }
+
+  describeDoctorHint(): string {
+    return `Check that the OS keychain is unlocked. Do NOT 'mementos init --reinit' before verifying — that would generate a new key.`
+  }
+
   async isAlreadyConfigured(): Promise<boolean> {
     try {
       await this.getMnemonic()

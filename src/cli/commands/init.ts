@@ -141,29 +141,13 @@ async function runInitNew(deps: InitDeps): Promise<void> {
   await refuseFlagSwitches(existing, existingVault)
 
   const backendType = await promptChoice(ctx, 'Storage backend', 'backend', storageReg, 'local')
-  if (backendType === 'local') {
-    ctx.print('')
-    ctx.print('Tip: for cloud sync without setting up git, point the vault path at a folder')
-    ctx.print('inside an OS sync client (Google Drive, Dropbox, iCloud). The sync daemon')
-    ctx.print('handles transfer transparently — mementos just reads and writes files.')
-    ctx.print('')
-  }
+  // Selection-time tips (e.g. local's OS-sync tip, openai's privacy note) are
+  // fired by promptChoice itself — each impl module exports `describeSelectionTip`.
   const chosenVaultPath = await promptPath(
     ctx, 'Where should the vault live?', 'vault-path',
     existing?.vaultPath ?? vaultPath(),
   )
   const embedderType = await promptChoice(ctx, 'Embedder', 'embedder', embedderReg, 'minilm')
-  if (embedderType === 'openai') {
-    // mementos's headline is E2EE — but the openai embedder sends raw memory text to
-    // OpenAI's API. Users picking 'openai' to "get better recall" without reading the
-    // README would silently forfeit the property they came for. Surface the trade-off at
-    // the moment of decision; the on-device minilm default is privacy-safe.
-    ctx.print('')
-    ctx.print('Note: the openai embedder sends every memento\'s text to OpenAI\'s API for embedding.')
-    ctx.print('Encryption protects data AT REST in the vault, but NOT this network call.')
-    ctx.print('For full end-to-end privacy, re-run init with --embedder=minilm.')
-    ctx.print('')
-  }
   const indexType = await promptChoice(ctx, 'Vector index', 'index', indexReg, 'hnsw')
   const retrieverType = await promptChoice(ctx, 'Retriever', 'retriever', retrieverReg, 'semantic')
   const searcherType = await promptChoice(ctx, 'Searcher (lexical search — scan/trigram, or none to disable)', 'searcher', searcherReg, 'scan')

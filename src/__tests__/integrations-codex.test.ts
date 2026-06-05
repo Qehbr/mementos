@@ -113,9 +113,9 @@ describe('CodexIntegration', () => {
   // ─── Hooks ────────────────────────────────────────────────────────────────
   const hooksPath = () => join(home, '.codex', 'hooks.json')
 
-  it('supportedHooks reports only auto-retrieve (Codex has no compaction event)', async () => {
+  it('supportedHooks reports auto-retrieve + session-start (Codex has no compaction event)', async () => {
     const { CodexIntegration } = await import('../integrations/codex/index.js')
-    expect(new CodexIntegration().hooks.supportedHooks()).toEqual(['auto-retrieve'])
+    expect(new CodexIntegration().hooks.supportedHooks()).toEqual(['auto-retrieve', 'session-start'])
   })
 
   it('enableHook writes a UserPromptSubmit command hook to hooks.json', async () => {
