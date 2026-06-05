@@ -143,9 +143,11 @@ export async function confirmFallbackOrThrow(ctx: InitContext): Promise<void> {
   ctx.warn('')
 
   const { confirm } = await import('@inquirer/prompts')
+  const { promptTheme } = await import('../../cli/_utils/style.js')
   const proceed = await confirm({
     message: 'Continue with the chmod-600 fallback?',
     default: false,
+    theme: promptTheme,
   })
   if (!proceed) {
     throw new Error('Aborted at user request — install a keychain backend and re-run, or pass --keychain-fallback=allow.')

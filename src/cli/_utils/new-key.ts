@@ -22,6 +22,7 @@ import {
 } from '../../keys/_utils/derivation/index.js'
 import { generateMnemonic } from '../../keys/_utils/mnemonic.js'
 import { parseFlag } from './flags.js'
+import { promptTheme } from './style.js'
 import type { CliInitContext } from '../init-context.js'
 
 type Source = 'generate' | 'type'
@@ -41,6 +42,7 @@ export async function promptForNewKey(ctx: CliInitContext): Promise<{ entropy: B
       { name: 'Type my own 24-word mnemonic', value: 'type' },
     ],
     default: 'generate',
+    theme: promptTheme,
   })
 
   if (source === 'generate') {
@@ -58,8 +60,8 @@ export async function promptForNewKey(ctx: CliInitContext): Promise<{ entropy: B
   }
   const normalize = (s: string): string => s.trim().split(/\s+/).join(' ')
   for (let attempt = 1; attempt <= 3; attempt++) {
-    const first = await input({ message: 'New mnemonic (24 words separated by spaces):', validate: countOK })
-    const second = await input({ message: 'Re-enter the new mnemonic to confirm:', validate: countOK })
+    const first = await input({ message: 'New mnemonic (24 words separated by spaces):', validate: countOK, theme: promptTheme })
+    const second = await input({ message: 'Re-enter the new mnemonic to confirm:', validate: countOK, theme: promptTheme })
     if (normalize(first) === normalize(second)) {
       return { entropy: await collectMnemonic(first) }
     }

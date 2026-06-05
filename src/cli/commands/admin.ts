@@ -16,6 +16,7 @@ import { loadIntegrations } from '../../integrations/registry.js'
 import type { ClientIntegration, HookSurface } from '../../integrations/interface.js'
 import { buildKeyProvider, readMachineConfigOrExit } from '../_utils/vault.js'
 import { parseFlag } from '../_utils/flags.js'
+import { WizardHeader } from '../_utils/prompts.js'
 
 interface HookCapable {
   name: string
@@ -121,6 +122,9 @@ export async function runIntegration(subcommand: string | undefined, args: strin
     // progress fire the same way they do in `mementos init`.
     const { CliInitContext } = await import('../init-context.js')
     const { setupIntegrations } = await import('./init.js')
+    // Single-step header so the user sees the command name + a full progress
+    // bar — the underlying flow has one user-facing prompt (the checkbox).
+    new WizardHeader('mementos integration configure', 1).show(1, console.log)
     await setupIntegrations(new CliInitContext(), integrationReg)
     return
   }

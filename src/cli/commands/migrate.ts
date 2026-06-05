@@ -28,7 +28,8 @@ import { assertNoServerRunning } from '../_utils/assert-no-server.js'
 import { CliInitContext } from '../init-context.js'
 import type { InitContext } from '../../core/init-context/interface.js'
 import { requireImpl, refuseIfNonEmpty, requireFullMachineConfig, runSetupAtInit, buildVaultFromConfig, buildKeyProvider, buildStorageBackend, buildStorageAndKey } from '../_utils/vault.js'
-import { promptChoice, promptPath } from '../_utils/prompts.js'
+import { promptChoice, promptPath, WizardHeader } from '../_utils/prompts.js'
+import { promptTheme, dim } from '../_utils/style.js'
 import { parseFlag } from '../_utils/flags.js'
 import { promptForNewKey } from '../_utils/new-key.js'
 import {
@@ -92,14 +93,18 @@ export async function runMigrate(): Promise<void> {
 async function promptType(): Promise<MigrationType> {
   const fromFlag = parseFlag('type')
   if (fromFlag === 'storage' || fromFlag === 'key' || fromFlag === 'embedder') return fromFlag
+  // Top-level migration-type pick. Each branch paints its own header with
+  // branch-specific step count below.
+  new WizardHeader('mementos migrate', 1).show(1, console.log)
   return await select<MigrationType>({
-    message: 'What kind of migration?',
+    message: `What kind of migration?\n${dim('  Each branch re-encrypts the whole vault under a different config — pick the dimension you want to change.')}`,
     choices: [
       { name: 'Storage backend  (move .mem files to a different backend, e.g. local → git)', value: 'storage' },
       { name: 'Vault key  (rotate to a new mnemonic, re-encrypt all memories)', value: 'key' },
       { name: 'Embedder  (switch embedder, re-embed all memories, rebuild index)', value: 'embedder' },
     ],
     default: 'storage',
+    theme: promptTheme,
   })
 }
 
@@ -210,6 +215,9 @@ async function runKeyMigration(ctx: CliInitContext, machine: MachineConfig): Pro
   const { storage, keyProvider: provider } = await loadMigrationBackends(machine)
   const oldKey = await provider.getKey()
 
+  // The new-key flow has its own 1-3 prompts (generate vs type, optional
+  // double-entry); 1-step header here gives the user the command context.
+  new WizardHeader('mementos migrate (key)', 1).show(1, ctx.print)
   // New key from the user — generated fresh (recommended) or typed (entered twice).
   const { entropy: newEntropy } = await promptForNewKey(ctx)
   const newKey = deriveKeyFromEntropy(newEntropy)
@@ -303,11 +311,15 @@ async function runEmbedderMigration(ctx: CliInitContext, machine: MachineConfig)
     loadEmbedders(),
   ])
 
+  new WizardHeader('mementos migrate (embedder)', 1).show(1, ctx.print)
   const targetEmbedderType = await promptChoice(
     ctx, `Target embedder (current: ${currentEmbedderType})`,
     'target-embedder',
     new Map([...embedderReg].filter(([name]) => name !== currentEmbedderType)),
-    [...embedderReg.keys()].find(k => k !== currentEmbedderType) ?? '',
+    {
+      defaultType: [...embedderReg.keys()].find(k => k !== currentEmbedderType) ?? '',
+      hint: 'Re-embeds every memento under the new model and rebuilds the vector index.',
+    },
   )
   if (targetEmbedderType === currentEmbedderType) {
     ctx.warn(`Target embedder must differ from current (${currentEmbedderType}). Nothing to do.`)
@@ -417,7 +429,14 @@ async function runStorageMigration(ctx: CliInitContext, machine: MachineConfig):
   const storageReg = await loadStorageBackends()
   ctx.print(`Current vault: backend=${machine.backend}, path=${machine.vaultPath}\n`)
 
-  const targetBackendType = await promptChoice(ctx, 'Target storage backend', 'backend', storageReg, 'git')
+  const header = new WizardHeader('mementos migrate (storage)', 2)
+  header.show(1, ctx.print)
+  const targetBackendType = await promptChoice(ctx, 'Target storage backend', 'backend', storageReg, {
+    defaultType: 'git',
+    hint: 'Where the encrypted .mem files will live after the migration.',
+  })
+  header.show(2, ctx.print)
+  ctx.print(dim('  Absolute path; refuses to start if anything already exists at this location.'))
   const targetVaultPath = await promptPath(ctx, 'Target vault path (must be empty or non-existent)', 'vault-path', '')
   if (targetVaultPath === machine.vaultPath) {
     ctx.warn('Target vault path is the same as the current one. Pick a different path.')
@@ -540,7 +559,12 @@ async function probeTarget(target: MachineConfig): Promise<void> {
 async function resumeOrAbort(machine: MachineConfig, manifest: MigrationManifest): Promise<void> {
   const ctx = new CliInitContext()
   ctx.print(`Detected migration in progress (type=${manifest.type}, started=${manifest.startedAt}).`)
-  const cont = await confirmPrompt({ message: 'Continue this migration?', default: true })
+  new WizardHeader('mementos migrate (resume)', 1).show(1, ctx.print)
+  const cont = await confirmPrompt({
+    message: `Continue this migration?\n${dim('  Choose No to abort and roll back any staged changes.')}`,
+    default: true,
+    theme: promptTheme,
+  })
   if (!cont) {
     await doAbort(manifest, machine, ctx)
     return

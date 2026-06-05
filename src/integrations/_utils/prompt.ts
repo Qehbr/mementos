@@ -8,6 +8,7 @@
  * hangs the process.
  */
 import { confirm } from '@inquirer/prompts'
+import { promptTheme } from '../../cli/_utils/style.js'
 import type { InitContext } from '../../core/init-context/interface.js'
 import type { HookSurface } from '../interface.js'
 import type { StepCounter } from '../../cli/_utils/prompts.js'
@@ -18,7 +19,7 @@ export async function resolveYesNo(
   const f = ctx.getFlag(flag)
   if (f === 'on') return true
   if (f === 'off') return false
-  return confirm({ message, default: defaultYes })
+  return confirm({ message, default: defaultYes, theme: promptTheme })
 }
 
 /**

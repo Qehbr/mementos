@@ -28,7 +28,12 @@ import { printBanner } from './_utils/banner.js'
 // names the next command to run. Without this handler Node prints a raw "unhandled
 // rejection" stack and buries that message; here we surface just the message and exit 1.
 // MEMENTOS_DEBUG re-enables the full stack for diagnosing an unexpected failure.
+//
+// Ctrl-C inside an interactive `@inquirer/prompts` call rejects with `ExitPromptError`
+// — that's not an error worth a stack trace; the user intentionally aborted. Exit 130
+// (the POSIX convention for SIGINT-terminated programs) with no output.
 process.on('unhandledRejection', (reason: unknown) => {
+  if (reason instanceof Error && reason.name === 'ExitPromptError') process.exit(130)
   const err = reason instanceof Error ? reason : new Error(String(reason))
   console.error(err.message)
   if (process.env['MEMENTOS_DEBUG']) console.error(err.stack)
@@ -37,43 +42,52 @@ process.on('unhandledRejection', (reason: unknown) => {
 
 const [, , command, subcommand, ...args] = process.argv
 
-switch (command) {
-  case 'init':        await runInit(); break
-  case 'serve':       await runServe(); break
-  case 'retrieve':    await runRetrieve(); break
-  case 'session-start': await runSessionStart(); break
-  case 'list':        await runList(subcommand, args); break
-  case 'get':         await runGet(subcommand); break
-  case 'delete':      await runDelete(subcommand); break
-  case 'search':      await runSearch(subcommand, args); break
-  case 'sync':        await runSync(); break
-  case 'integration': await runIntegration(subcommand, args); break
-  case 'share-key':   await runShareKey(); break
-  case 'destroy':     await runDestroy(); break
-  case 'uninstall':   await runDestroy(); break
-  case 'migrate':     await runMigrate(); break
-  case 'backup':      await runBackup(subcommand); break
-  case 'restore':     await runRestore(subcommand); break
-  case 'doctor':      await runDoctor(); break
-  case 'ingest':      await runIngest(subcommand, args); break
-  case 'snapshot':    await runSnapshot(); break
-  case undefined:
-    printBanner()
-    printQuickstart()
-    break
-  case 'help':
-  case '--help':
-  case '-h':
-    printBanner()
-    printFullHelp()
-    break
-  default:
-    // Unknown command — show the quickstart so the user sees a path forward, but exit 1
-    // so scripting doesn't silently treat a typo as success.
-    printBanner()
-    console.error(`Unknown command: \`${command}\`. See the quickstart below; run \`mementos --help\` for the full reference.\n`)
-    printQuickstart()
-    process.exitCode = 1
+// Top-level try/catch belt-and-braces alongside the unhandledRejection handler
+// above. In Node 22's default `--unhandled-rejections=throw` mode the runtime
+// can still print an ExitPromptError trace BEFORE the rejection handler runs;
+// catching here suppresses it cleanly and exits 130 (POSIX SIGINT convention).
+try {
+  switch (command) {
+    case 'init':        await runInit(); break
+    case 'serve':       await runServe(); break
+    case 'retrieve':    await runRetrieve(); break
+    case 'session-start': await runSessionStart(); break
+    case 'list':        await runList(subcommand, args); break
+    case 'get':         await runGet(subcommand); break
+    case 'delete':      await runDelete(subcommand); break
+    case 'search':      await runSearch(subcommand, args); break
+    case 'sync':        await runSync(); break
+    case 'integration': await runIntegration(subcommand, args); break
+    case 'share-key':   await runShareKey(); break
+    case 'destroy':     await runDestroy(); break
+    case 'uninstall':   await runDestroy(); break
+    case 'migrate':     await runMigrate(); break
+    case 'backup':      await runBackup(subcommand); break
+    case 'restore':     await runRestore(subcommand); break
+    case 'doctor':      await runDoctor(); break
+    case 'ingest':      await runIngest(subcommand, args); break
+    case 'snapshot':    await runSnapshot(); break
+    case undefined:
+      printBanner()
+      printQuickstart()
+      break
+    case 'help':
+    case '--help':
+    case '-h':
+      printBanner()
+      printFullHelp()
+      break
+    default:
+      // Unknown command — show the quickstart so the user sees a path forward, but exit 1
+      // so scripting doesn't silently treat a typo as success.
+      printBanner()
+      console.error(`Unknown command: \`${command}\`. See the quickstart below; run \`mementos --help\` for the full reference.\n`)
+      printQuickstart()
+      process.exitCode = 1
+  }
+} catch (e) {
+  if (e instanceof Error && e.name === 'ExitPromptError') process.exit(130)
+  throw e
 }
 
 /**

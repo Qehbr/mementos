@@ -23,6 +23,8 @@
 import { readdir, stat } from 'node:fs/promises'
 import { join, sep } from 'node:path'
 import { checkbox, input, confirm } from '@inquirer/prompts'
+import { WizardHeader } from '../_utils/prompts.js'
+import { promptTheme, checkboxTheme, dim } from '../_utils/style.js'
 import { buildVault } from '../_utils/vault.js'
 import { parseFlag } from '../_utils/flags.js'
 import { loadIngestors } from '../../ingestors/registry.js'
@@ -46,7 +48,13 @@ export async function runIngest(positional: string | undefined, _rest: string[])
   }
   const ingestors = [...ingestorReg.values()].map(impl => impl.create())
 
-  const paths = positional ? [positional] : await interactiveDiscovery(ingestors)
+  // Header steps count only the prompts that will actually fire — `positional`
+  // skips the sources prompt, `--tag=` skips the tag loop. Fully scripted
+  // (positional + --tag): no header at all.
+  const interactiveSteps = (positional ? 0 : 1) + (tagFlag !== undefined ? 0 : 1)
+  const header = interactiveSteps > 0 ? new WizardHeader('mementos ingest', interactiveSteps) : null
+
+  const paths = positional ? [positional] : await interactiveDiscovery(ingestors, header, 1)
   if (paths.length === 0) {
     console.log('Nothing to ingest.')
     return
@@ -66,7 +74,7 @@ export async function runIngest(positional: string | undefined, _rest: string[])
 
   const userTags = tagFlag !== undefined
     ? tagFlag.split(',').map(t => t.trim()).filter(Boolean)
-    : await promptTagsInteractive()
+    : await promptTagsInteractive(header, interactiveSteps)
 
   console.log(`\nIngesting ${matches.length} file(s)${dryRun ? ' (dry-run — nothing will be written)' : ''}…`)
 
@@ -157,7 +165,7 @@ async function discoverSources(ingestors: Ingestor[]): Promise<Source[]> {
  * default location (raw markdown, ad-hoc directories) or files outside the canonical
  * layout.
  */
-async function interactiveDiscovery(ingestors: Ingestor[]): Promise<string[]> {
+async function interactiveDiscovery(ingestors: Ingestor[], header: WizardHeader | null, step: number): Promise<string[]> {
   const sources = await discoverSources(ingestors)
   console.log('Scanning for ingestible content…\n')
   if (sources.length === 0) {
@@ -174,15 +182,17 @@ async function interactiveDiscovery(ingestors: Ingestor[]): Promise<string[]> {
   }))
   choices.push({ name: 'Custom path (enter a file or directory)', value: '__custom__' })
 
+  header?.show(step, console.log)
   const chosen = await checkbox<string>({
-    message: 'Which sources to ingest?',
+    message: `Which sources to ingest?\n${dim('  Each ticked source is scanned for ingestible files; pick none and add a custom path below.')}`,
     choices,
     required: false,
+    theme: checkboxTheme,
   })
   const paths: string[] = []
   for (const c of chosen) {
     if (c === '__custom__') {
-      const custom = await input({ message: 'Path to file or directory:' })
+      const custom = await input({ message: 'Path to file or directory:', theme: promptTheme })
       if (custom.trim()) paths.push(custom.trim())
     } else {
       paths.push(c)
@@ -224,11 +234,14 @@ async function* walkFiles(path: string): AsyncGenerator<string> {
  * yes) — so an intentional Enter exits cleanly but an accidental Enter doesn't lose
  * progress; the user answers `n` and the loop keeps going.
  */
-async function promptTagsInteractive(): Promise<string[]> {
-  console.log('')
+async function promptTagsInteractive(header: WizardHeader | null, step: number): Promise<string[]> {
+  // Show the header once at the start of the loop — the loop itself uses
+  // many prompts but they're all "the tag step" semantically.
+  header?.show(step, console.log)
+  console.log(dim('  Tags help you find these mementos later. Press Enter blank to finish.'))
   const tags: string[] = []
   for (;;) {
-    const t = (await input({ message: `Tag ${tags.length + 1} (blank to finish):` })).trim()
+    const t = (await input({ message: `Tag ${tags.length + 1} (blank to finish):`, theme: promptTheme })).trim()
     if (t) {
       tags.push(t)
       continue
@@ -236,6 +249,7 @@ async function promptTagsInteractive(): Promise<string[]> {
     const done = await confirm({
       message: `Done adding tags?${tags.length > 0 ? ` (current: ${tags.join(', ')})` : ''}`,
       default: true,
+      theme: promptTheme,
     })
     if (done) return tags
   }

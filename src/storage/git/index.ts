@@ -93,6 +93,7 @@ async function promptRemoteUrl(ctx: InitContext, current?: string): Promise<stri
   const fromFlag = ctx.getFlag('git-remote')
   if (fromFlag !== undefined && fromFlag !== '') return fromFlag
   const { input } = await import('@inquirer/prompts')
+  const { promptTheme } = await import('../../cli/_utils/style.js')
   const message = current
     ? 'Git remote URL (current):'
     : 'Git remote URL (e.g. git@github.com:user/vault.git):'
@@ -100,6 +101,7 @@ async function promptRemoteUrl(ctx: InitContext, current?: string): Promise<stri
     message,
     default: current,
     validate: (v: string) => v.trim().length > 0 || 'Remote URL is required',
+    theme: promptTheme,
   })
 }
 
@@ -136,9 +138,11 @@ async function promptSshKey(
   if (!parsed.isSsh) {
     if (parsed.sshUrl) {
       const { confirm } = await import('@inquirer/prompts')
+      const { promptTheme } = await import('../../cli/_utils/style.js')
       const ok = await confirm({
         message: `SSH-key auth needs an SSH remote URL. Rewrite ${remote} → ${parsed.sshUrl}?`,
         default: true,
+        theme: promptTheme,
       })
       if (!ok) {
         ctx.warn('Keeping HTTPS remote — skipping SSH key setup (using inherited git auth).')
@@ -164,6 +168,7 @@ async function promptSshKey(
 
 async function selectSshKeyChoice(): Promise<'generate' | 'existing' | 'inherit'> {
   const { select } = await import('@inquirer/prompts')
+  const { promptTheme } = await import('../../cli/_utils/style.js')
   return await select<'generate' | 'existing' | 'inherit'>({
     message: 'Per-vault SSH key (recommended: scopes write access to this repo only)',
     choices: [
@@ -172,6 +177,7 @@ async function selectSshKeyChoice(): Promise<'generate' | 'existing' | 'inherit'
       { name: 'Inherit from system git (no per-vault key)', value: 'inherit' },
     ],
     default: 'generate',
+    theme: promptTheme,
   })
 }
 
@@ -238,9 +244,11 @@ async function resolveExistingKey(ctx: InitContext, providedPath: string | undef
   if (providedPath !== undefined) raw = providedPath
   else {
     const { input } = await import('@inquirer/prompts')
+    const { promptTheme } = await import('../../cli/_utils/style.js')
     raw = await input({
       message: 'Path to your SSH private key:',
       validate: (v: string) => v.trim().length > 0 || 'Key path is required',
+      theme: promptTheme,
     })
   }
   const expanded = raw.startsWith('~/') ? join(homedir(), raw.slice(2)) : raw
@@ -274,7 +282,8 @@ async function displayPubkey(ctx: InitContext, keyPath: string, parsed: ParsedRe
   ctx.print('─────────────────────────────────')
   ctx.print('')
   const { input } = await import('@inquirer/prompts')
-  await input({ message: 'Press Enter once added' })
+  const { promptTheme } = await import('../../cli/_utils/style.js')
+  await input({ message: 'Press Enter once added', theme: promptTheme })
 }
 
 async function verifySshConnection(ctx: InitContext, remote: string, keyPath: string): Promise<void> {

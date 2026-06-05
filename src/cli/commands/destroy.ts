@@ -22,6 +22,8 @@
 import { rm } from 'node:fs/promises'
 import { dirname } from 'node:path'
 import { checkbox, confirm as confirmPrompt } from '@inquirer/prompts'
+import { WizardHeader } from '../_utils/prompts.js'
+import { promptTheme, checkboxTheme, dim } from '../_utils/style.js'
 import { readMachineConfigOrNull, machineConfigFile } from '../../core/config.js'
 import { loadIntegrations } from '../../integrations/registry.js'
 import { buildStorageAndKey } from '../_utils/vault.js'
@@ -45,28 +47,33 @@ export async function runDestroy(): Promise<void> {
   const installedIntegrations = await collectInstalledIntegrations()
   const dataSummary = await storage.describeStoredData()
 
+  const header = new WizardHeader('mementos destroy', 2)
+  header.show(1, console.log)
+  // Every target ships UNCHECKED — destroy is destructive, opt-in only. Users
+  // tick exactly what they mean to remove; blind Enter removes nothing.
   const chosen = await checkbox<Target>({
-    message: 'What should I remove?',
+    message: `What should I remove?\n${dim('  Nothing is pre-selected — tick what you want gone. Vault data is preserved either way.')}`,
     choices: [
       {
-        name: `Machine config & local state  (${dirname(machineConfigFile())}/)`,
+        name: `Machine config & local state  ${dim(`(${dirname(machineConfigFile())}/)`)}`,
         value: 'config',
-        checked: true,
+        checked: false,
       },
       {
-        name: `Vault key  (${provider.describeStoredKey()})`,
+        name: `Vault key  ${dim(`(${provider.describeStoredKey()})`)}`,
         value: 'key',
-        checked: true,
+        checked: false,
       },
       {
         name: installedIntegrations.length > 0
-          ? `AI client integrations  (${installedIntegrations.map(i => i.name).join(', ')})`
-          : 'AI client integrations  (none currently installed)',
+          ? `AI client integrations  ${dim(`(${installedIntegrations.map(i => i.name).join(', ')})`)}`
+          : `AI client integrations  ${dim('(none currently installed)')}`,
         value: 'integrations',
-        checked: installedIntegrations.length > 0,
+        checked: false,
         disabled: installedIntegrations.length === 0 ? '(nothing to remove)' : false,
       },
     ],
+    theme: checkboxTheme,
   })
 
   if (chosen.length === 0) {
@@ -85,9 +92,11 @@ export async function runDestroy(): Promise<void> {
   console.log('(mementos does NOT remove vault data automatically — see below for manual removal.)')
   console.log('')
 
+  header.show(2, console.log)
   const ok = await confirmPrompt({
-    message: `Proceed with removing: ${chosen.join(', ')}?`,
+    message: `Proceed with removing: ${chosen.join(', ')}?\n${dim('  This is irreversible for the selected items.')}`,
     default: false,
+    theme: promptTheme,
   })
   if (!ok) {
     console.log('Aborted.')

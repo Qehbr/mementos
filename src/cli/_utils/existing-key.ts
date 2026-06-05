@@ -16,6 +16,7 @@
 import { input, select, confirm as confirmPrompt } from '@inquirer/prompts'
 import { mnemonicToEntropyBytes } from '../../keys/_utils/derivation/index.js'
 import { receiveKey, type DiscoveredPeer } from '../_transfer/index.js'
+import { promptTheme } from './style.js'
 import type { CliInitContext } from '../init-context.js'
 
 type Source = 'mnemonic' | 'raw' | 'lan'
@@ -28,6 +29,7 @@ export async function promptForExistingKey(ctx: CliInitContext): Promise<Buffer>
       { name: 'Type the raw 32-byte entropy (base64)', value: 'raw' },
       { name: 'Receive via LAN pairing (another mementos device running `share-key`)', value: 'lan' },
     ],
+    theme: promptTheme,
   })
 
   switch (source) {
@@ -45,6 +47,7 @@ async function collectMnemonic(): Promise<Buffer> {
   let entropy: Buffer | undefined
   await input({
     message: 'Mnemonic (24 words separated by spaces):',
+    theme: promptTheme,
     validate: async (value: string) => {
       const trimmed = value.trim()
       if (!trimmed) return 'Mnemonic cannot be empty.'
@@ -65,6 +68,7 @@ async function collectMnemonic(): Promise<Buffer> {
 async function collectRaw(): Promise<Buffer> {
   const value = (await input({
     message: 'Base64-encoded 32-byte entropy:',
+    theme: promptTheme,
     validate: (v: string) => {
       const trimmed = v.trim()
       if (!trimmed) return 'Cannot be empty.'
@@ -82,7 +86,7 @@ async function collectViaLan(ctx: CliInitContext): Promise<Buffer> {
     async (sas) => {
       ctx.print('')
       ctx.print(`Verify this number matches on BOTH screens:  ${sas}`)
-      return await confirmPrompt({ message: 'Match?', default: false })
+      return await confirmPrompt({ message: 'Match?', default: false, theme: promptTheme })
     },
     pickPeer,
   )
@@ -117,5 +121,6 @@ async function pickPeer(peers: DiscoveredPeer[]): Promise<DiscoveredPeer | null>
   return await select({
     message: 'Multiple senders found — which one?',
     choices: peers.map(p => ({ name: `${p.name}  (${p.host}:${p.port})`, value: p })),
+    theme: promptTheme,
   })
 }

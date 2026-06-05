@@ -7,6 +7,8 @@
  * and TTY-only (refuses piped/redirected stdout, same posture as `sudo`).
  */
 import { select, confirm as confirmPrompt } from '@inquirer/prompts'
+import { WizardHeader } from '../_utils/prompts.js'
+import { promptTheme, dim } from '../_utils/style.js'
 import { machineConfigFile } from '../../core/config.js'
 import {
   mnemonicToEntropyBytes, entropyToMnemonicString,
@@ -58,19 +60,24 @@ export async function runShareKey(): Promise<void> {
     process.exit(1)
   }
 
+  // 2-step header: pick mode (1), then either format (2) for show-flow or SAS
+  // confirm (2) for lan-flow. Both branches share the same shape.
+  const header = new WizardHeader('mementos share-key', 2)
+  header.show(1, ctx.print)
   type Mode = 'show' | 'lan'
   const mode = await select<Mode>({
-    message: 'How would you like to share the key?',
+    message: `How would you like to share the key?\n${dim('  The receiving device must run `mementos init --mode=join` to accept the key.')}`,
     choices: [
       { name: 'Show on screen (copy/write down for backup or manual entry on the new device)', value: 'show' },
       { name: 'Send via LAN pairing (another mementos device on this network)', value: 'lan' },
     ],
+    theme: promptTheme,
   })
 
   if (mode === 'show') {
-    await runShowFlow(ctx, canonical)
+    await runShowFlow(ctx, canonical, header)
   } else {
-    await runLanSendFlow(ctx, canonical)
+    await runLanSendFlow(ctx, canonical, header)
   }
 }
 
@@ -79,14 +86,16 @@ export async function runShareKey(): Promise<void> {
  * encodes as BIP39 words, env encodes as base64), the user can pick either display form
  * regardless of which provider this machine uses — BIP39 is fully invertible.
  */
-async function runShowFlow(ctx: CliInitContext, canonical: CanonicalSecret): Promise<void> {
+async function runShowFlow(ctx: CliInitContext, canonical: CanonicalSecret, header: WizardHeader): Promise<void> {
+  header.show(2, ctx.print)
   type Format = 'mnemonic' | 'raw'
   const chosenFormat = await select<Format>({
-    message: 'Show as:',
+    message: `Show as:\n${dim('  Both forms encode the same 32-byte key — pick whichever the receiving device prefers.')}`,
     choices: [
       { name: '24-word mnemonic phrase (for keychain provider on new device)', value: 'mnemonic' },
       { name: 'Raw 32-byte entropy, base64 (for env provider / MEMENTOS_RAW_KEY)', value: 'raw' },
     ],
+    theme: promptTheme,
   })
 
   const displayValue = await convertCanonical(canonical, chosenFormat)
@@ -113,7 +122,7 @@ async function convertCanonical(canonical: CanonicalSecret, target: 'mnemonic' |
  * what arrived is a mnemonic or a raw key. The protocol layer is content-agnostic;
  * format-tagging is a share-key/receive-key contract.
  */
-async function runLanSendFlow(ctx: CliInitContext, canonical: CanonicalSecret): Promise<void> {
+async function runLanSendFlow(ctx: CliInitContext, canonical: CanonicalSecret, header: WizardHeader): Promise<void> {
   const payload = JSON.stringify({ format: canonical.format, value: canonical.value })
   // Pre-print: without this, the user sees only "Listening on port N…" and a silent
   // 5-min wait, with no indication that the receiver-side device has to run a specific
@@ -125,9 +134,13 @@ async function runLanSendFlow(ctx: CliInitContext, canonical: CanonicalSecret): 
     payload,
     msg => ctx.print(msg),
     async (sas) => {
-      ctx.print('')
+      header.show(2, ctx.print)
       ctx.print(`Verify this number matches on BOTH screens:  ${sas}`)
-      return await confirmPrompt({ message: 'Match?', default: false })
+      return await confirmPrompt({
+        message: `Match?\n${dim('  Both devices should display the same 6-digit number — if they differ, abort.')}`,
+        default: false,
+        theme: promptTheme,
+      })
     },
   )
 }

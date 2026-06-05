@@ -45,11 +45,17 @@ describe('validatePath', () => {
 
 describe('promptChoice — non-interactive branches', () => {
   type Impl = DiscoveredImpl<unknown>
+  /** Strip ANSI escape sequences so assertions compare against the visible
+   *  text. promptChoice colours the auto-pick "only option" notice with the
+   *  brand-violet theme; the visible content (✔ / type / "(only option)") is
+   *  what the test cares about. */
+  // eslint-disable-next-line no-control-regex
+  const stripAnsi = (s: string): string => s.replace(/\x1b\[[0-9;]*m/g, '')
   function ctx(flags: Record<string, string | undefined> = {}): InitContext & { printed: string[] } {
     const printed: string[] = []
     return {
       printed,
-      print: (msg: string) => { printed.push(msg) },
+      print: (msg: string) => { printed.push(stripAnsi(msg)) },
       warn: () => {},
       showSecret: async () => {},
       getFlag: (name: string) => flags[name],
@@ -60,30 +66,16 @@ describe('promptChoice — non-interactive branches', () => {
     return new Map(types.map(t => [t, { type: t } as unknown as Impl]))
   }
 
-  it('returns the flag value directly when --flag=<v> is provided (skips both auto-pick and prompt)', async () => {
+  it('returns the flag value directly when --flag=<v> is provided (skips the prompt)', async () => {
     // Even with 3 options, an explicit flag wins — this is the CI / scripted path.
     const c = ctx({ backend: 'git' })
     expect(await promptChoice(c, 'Storage', 'backend', regOf('local', 'git', 'other'), 'local')).toBe('git')
     expect(c.printed).toEqual([])  // no prompt-skip message: there was no prompt to skip
   })
 
-  it('auto-picks the single registry entry without prompting and tells the user', async () => {
-    // The scenario this branch exists for: an abstraction with only one impl (today: hnsw).
-    // Without the branch, inquirer would render a useless one-choice menu.
-    const c = ctx()
-    expect(await promptChoice(c, 'Vector index', 'index', regOf('hnsw'), 'hnsw')).toBe('hnsw')
-    expect(c.printed).toEqual(['✔ Vector index: hnsw (only option)'])
-  })
-
-  it('auto-picks even when the registry default does not match the only key', async () => {
-    // Defensive: if a future registry has one entry that differs from the hardcoded default,
-    // we still pick the only available impl — not the unreachable default.
-    const c = ctx()
-    expect(await promptChoice(c, 'Vector index', 'index', regOf('faiss'), 'hnsw')).toBe('faiss')
-    expect(c.printed).toEqual(['✔ Vector index: faiss (only option)'])
-  })
-
-  it('flag overrides the auto-pick branch too (still respects the explicit choice)', async () => {
+  it('flag overrides the single-entry case (still respects the explicit choice)', async () => {
+    // A single-entry registry no longer auto-picks (users see and confirm every choice),
+    // but a flag still bypasses the prompt entirely for scripted use.
     const c = ctx({ index: 'forced' })
     expect(await promptChoice(c, 'Vector index', 'index', regOf('hnsw'), 'hnsw')).toBe('forced')
     expect(c.printed).toEqual([])

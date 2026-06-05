@@ -49,7 +49,8 @@ import type { KeyProviderImplementationModule } from '../../keys/registry.js'
 import type { RetrieverImplementationModule } from '../../retrievers/registry.js'
 import { CliInitContext } from '../init-context.js'
 import { requireImpl, refuseIfNonEmpty, runSetupAtInit } from '../_utils/vault.js'
-import { promptChoice, promptPath, StepCounter } from '../_utils/prompts.js'
+import { promptChoice, promptChoiceWithBack, promptPath, WizardHeader, BACK, type BackOr, StepCounter } from '../_utils/prompts.js'
+import { dim, checkboxTheme } from '../_utils/style.js'
 import { parseFlag } from '../_utils/flags.js'
 import { promptForExistingKey } from '../_utils/existing-key.js'
 import { ensureAllPlugins } from '../../core/plugins.js'
@@ -140,26 +141,72 @@ async function runInitNew(deps: InitDeps): Promise<void> {
   const existingVault = await readExistingVault(existing)
   await refuseFlagSwitches(existing, existingVault)
 
-  // 7 numbered prompts here + integrations checkbox in setupIntegrations = 8.
-  // Selection-time tips (e.g. local's OS-sync tip, openai's privacy note) are
-  // fired by promptChoice itself — each impl module exports `describeSelectionTip`.
-  const steps = new StepCounter(8)
-  const backendType = await promptChoice(ctx, steps.next('Storage backend'), 'backend', storageReg,
-    { defaultType: 'local', currentValue: existing?.backend })
-  const chosenVaultPath = await promptPath(
-    ctx, steps.next('Where should the vault live?'), 'vault-path',
-    existing?.vaultPath ?? vaultPath(), existing?.vaultPath,
-  )
-  const embedderType = await promptChoice(ctx, steps.next('Embedder'), 'embedder', embedderReg,
-    { defaultType: 'minilm', currentValue: existingVault?.vault.embedder })
-  const indexType = await promptChoice(ctx, steps.next('Vector index'), 'index', indexReg,
-    { defaultType: 'hnsw', currentValue: existing?.vectorIndex })
-  const retrieverType = await promptChoice(ctx, steps.next('Retriever'), 'retriever', retrieverReg,
-    { defaultType: 'semantic', currentValue: existing?.retriever })
-  const searcherType = await promptChoice(ctx, steps.next('Searcher (lexical search — scan/trigram, or none to disable)'),
-    'searcher', searcherReg, { defaultType: 'scan', currentValue: existing?.searcher })
-  const keyType = await promptChoice(ctx, steps.next('Key provider'), 'key', keyReg,
-    { defaultType: 'keychain', currentValue: existing?.keyProvider })
+  // 7 top-level prompts here + integrations checkbox in setupIntegrations = 8.
+  // Run them as a state machine so `← back` on any step rewinds to the previous
+  // one. Selection-time tips (local's OS-sync tip, openai's privacy note) fire
+  // inside promptChoiceWithBack via each impl module's describeSelectionTip.
+  const header = new WizardHeader('mementos init', 8)
+  const answers: Record<string, string> = {}
+
+  const choiceStep = async <F>(
+    cursor: number, id: string, label: string, hint: string, flag: string,
+    reg: Map<string, DiscoveredImpl<F>>, fallbackDefault: string, fallbackCurrent: string | undefined,
+  ): Promise<BackOr<string>> => {
+    header.show(cursor + 1, ctx.print)
+    const seed = (answers[id]) ?? fallbackCurrent
+    // Hint is rendered as a dim second line of the inquirer message itself
+    // (so it sits between `? Question` and the choices, not above the question).
+    return promptChoiceWithBack(ctx, label, flag, reg, { defaultType: fallbackDefault, currentValue: seed, hint })
+  }
+
+  const inputStep = async (cursor: number, id: string): Promise<string> => {
+    header.show(cursor + 1, ctx.print)
+    const seed = (answers[id]) ?? existing?.vaultPath
+    return promptPath(
+      ctx, 'Where should the vault live?', 'vault-path',
+      seed ?? vaultPath(), seed,
+    )
+  }
+
+  // One-line hint per step — sits dim under the header, above the inquirer
+  // prompt cursor `?`. Gives enough visual separation that the question and
+  // the first option no longer blur together.
+  const stepDefs = [
+    { id: 'backend',   run: (c: number) => choiceStep(c, 'backend',   'Storage backend', 'How mementos are kept on disk and synced across machines.',
+                                                       'backend',  storageReg,   'local',    existing?.backend) },
+    { id: 'vaultPath', run: async (c: number): Promise<BackOr<string>> => inputStep(c, 'vaultPath') },
+    { id: 'embedder',  run: (c: number) => choiceStep(c, 'embedder',  'Embedder',        'Converts memento text into vectors for semantic recall.',
+                                                       'embedder', embedderReg,  'minilm',   existingVault?.vault.embedder) },
+    { id: 'vindex',    run: (c: number) => choiceStep(c, 'vindex',    'Vector index',    'Data structure for nearest-neighbour search over embeddings.',
+                                                       'index',    indexReg,     'hnsw',     existing?.vectorIndex) },
+    { id: 'retriever', run: (c: number) => choiceStep(c, 'retriever', 'Retriever',       'How candidates are gathered + ranked before the recall result.',
+                                                       'retriever',retrieverReg, 'semantic', existing?.retriever) },
+    { id: 'searcher',  run: (c: number) => choiceStep(c, 'searcher',  'Searcher',        'Backs the `search` MCP tool — scan / trigram, or none to disable.',
+                                                       'searcher', searcherReg, 'scan',     existing?.searcher) },
+    { id: 'key',       run: (c: number) => choiceStep(c, 'key',       'Key provider',    'Where the AES vault key lives (keychain / env / mnemonic).',
+                                                       'key',      keyReg,       'keychain', existing?.keyProvider) },
+  ]
+
+  let cursor = 0
+  while (cursor < stepDefs.length) {
+    const result = await stepDefs[cursor].run(cursor)
+    if (result === BACK) {
+      cursor = Math.max(0, cursor - 1)
+    } else {
+      answers[stepDefs[cursor].id] = result
+      cursor++
+    }
+  }
+
+  // Safe to assert string: the while loop only exits when every step has
+  // been answered (the cursor reaches stepDefs.length).
+  const backendType     = answers['backend'] as string
+  const chosenVaultPath = answers['vaultPath'] as string
+  const embedderType    = answers['embedder'] as string
+  const indexType       = answers['vindex'] as string
+  const retrieverType   = answers['retriever'] as string
+  const searcherType    = answers['searcher'] as string
+  const keyType         = answers['key'] as string
 
   const storageImpl = requireImpl(storageReg, backendType, 'storage backend')
   const embedderImpl = requireImpl(embedderReg, embedderType, 'embedder')
@@ -223,7 +270,11 @@ async function runInitNew(deps: InitDeps): Promise<void> {
   ctx.print(`Wrote ${machineConfigFile()}\n`)
 
   await runFullInstall(ctx, embedderReg, embedderType)
-  await setupIntegrations(ctx, integrationReg, steps)
+  // Step 8 of the global wizard — paint the header before setupIntegrations
+  // renders its checkbox. setupIntegrations no longer needs its own counter
+  // for this flow; the header above is the wizard's only progress display.
+  header.show(8, ctx.print)
+  await setupIntegrations(ctx, integrationReg)
 }
 
 // ─── Join existing vault flow ─────────────────────────────────────────────────
@@ -244,11 +295,15 @@ async function runInitJoin(deps: InitDeps): Promise<void> {
     process.exit(1)
   }
 
-  // 7 numbered prompts here + integrations checkbox in setupIntegrations = 8.
-  const steps = new StepCounter(8)
-  const backendType = await promptChoice(ctx, steps.next('Storage backend'), 'backend', storageReg, 'local')
+  // Join flow is linear (no back-nav): there's a side-effect (git clone) midway
+  // that can't be cleanly undone, so we don't expose ← back. The header still
+  // paints before each prompt so the user sees overall progress.
+  const header = new WizardHeader('mementos init (join)', 8)
+  header.show(1, ctx.print)
+  const backendType = await promptChoice(ctx, 'Storage backend', 'backend', storageReg, 'local')
+  header.show(2, ctx.print)
   const chosenVaultPath = await promptPath(
-    ctx, steps.next('Where should the vault live on this machine?'), 'vault-path', vaultPath(),
+    ctx, 'Where should the vault live on this machine?', 'vault-path', vaultPath(),
   )
 
   const storageImpl = requireImpl(storageReg, backendType, 'storage backend')
@@ -294,11 +349,18 @@ async function runInitJoin(deps: InitDeps): Promise<void> {
   const embedderImpl = requireImpl(embedderReg, embedderType, 'embedder')
   await runSetupAtInit(embedderImpl, ctx)
 
-  const indexType = await promptChoice(ctx, steps.next('Vector index'), 'index', indexReg, 'hnsw')
-  const retrieverType = await promptChoice(ctx, steps.next('Retriever'), 'retriever', retrieverReg, 'semantic')
-  const searcherType = await promptChoice(ctx, steps.next('Searcher (lexical search — scan/trigram, or none to disable)'),
+  // Step 3 (embedder) is auto-adopted from vault.json — no prompt. Steps 4-7
+  // are the remaining choices. The header still paints so the user sees
+  // overall progress.
+  header.show(4, ctx.print)
+  const indexType = await promptChoice(ctx, 'Vector index', 'index', indexReg, 'hnsw')
+  header.show(5, ctx.print)
+  const retrieverType = await promptChoice(ctx, 'Retriever', 'retriever', retrieverReg, 'semantic')
+  header.show(6, ctx.print)
+  const searcherType = await promptChoice(ctx, 'Searcher (lexical search — scan/trigram, or none to disable)',
     'searcher', searcherReg, 'scan')
-  const keyType = await promptChoice(ctx, steps.next('Key provider'), 'key', keyReg, 'keychain')
+  header.show(7, ctx.print)
+  const keyType = await promptChoice(ctx, 'Key provider', 'key', keyReg, 'keychain')
 
   const indexImpl = requireImpl(indexReg, indexType, 'vector index')
   const retrieverImpl = requireImpl(retrieverReg, retrieverType, 'retriever')
@@ -338,7 +400,8 @@ async function runInitJoin(deps: InitDeps): Promise<void> {
   ctx.print(`Wrote ${machineConfigFile()}\n`)
 
   await runFullInstall(ctx, embedderReg, embedderType)
-  await setupIntegrations(ctx, integrationReg, steps)
+  header.show(8, ctx.print)
+  await setupIntegrations(ctx, integrationReg)
 }
 
 // ─── Shared helpers ───────────────────────────────────────────────────────────
@@ -454,6 +517,10 @@ export async function setupIntegrations(
     integrationImpls = wanted.map(name => requireImpl(integrationReg, name, 'integration'))
     await uninstallNotIn(integrationReg, new Set(wanted), ctx, '(not in --integrations)')
   } else if (integrationReg.size > 0) {
+    // Probing each registered client (`isClientPresent()` shells out / reads
+    // ~/.<client>/) can take a noticeable second on slow disks. Tell the user
+    // what's happening so the empty progress bar doesn't look stuck.
+    ctx.print(dim('Detecting AI clients on this machine…'))
     const present: Array<{ impl: DiscoveredImpl<IntegrationFactory>; name: string }> = []
     for (const impl of integrationReg.values()) {
       const integration = impl.create()
@@ -475,12 +542,13 @@ export async function setupIntegrations(
       const message = steps?.next('AI clients detected. Which should mementos be wired into?')
         ?? 'AI clients detected. Which should mementos be wired into?'
       const chosenTypes = await checkbox<string>({
-        message,
+        message: `${message}\n${dim('  Each installs the mementos MCP server + skill into the client.')}`,
         choices: checkedState.map(p => ({
-          name: anyInstalled && p.checked ? `${p.name} (current)` : p.name,
+          name: anyInstalled && p.checked ? `${p.name} ${dim('(current)')}` : p.name,
           value: p.impl.type,
           checked: anyInstalled ? p.checked : true,
         })),
+        theme: checkboxTheme,
       })
       integrationImpls = chosenTypes.map(type => {
         const match = present.find(p => p.impl.type === type)
