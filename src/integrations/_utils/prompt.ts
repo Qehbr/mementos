@@ -10,6 +10,7 @@
 import { confirm } from '@inquirer/prompts'
 import type { InitContext } from '../../core/init-context/interface.js'
 import type { HookSurface } from '../interface.js'
+import type { StepCounter } from '../../cli/_utils/prompts.js'
 
 export async function resolveYesNo(
   ctx: InitContext, flag: string, defaultYes: boolean, message: string,
@@ -35,11 +36,26 @@ export async function promptHookToggle(opts: {
   /** Hook kind for the `--type=K` suffix on the follow-up command; omitted = no suffix. */
   kind?: string
   current: boolean
+  /**
+   * Override the prompt's default Yes/No regardless of `current`. Use for hooks
+   * we want enabled by default for new installs (e.g. session-start, which is
+   * cheap and high-value). When omitted, the default tracks `current` — i.e.
+   * blind-Enter keeps the user's existing choice on re-init.
+   */
+  defaultYes?: boolean
+  /**
+   * Optional per-integration step counter — prefixes the prompt with
+   * `[▰▰▱▱] N/M` so the user sees where they are inside ONE integration's
+   * questions. Distinct from the global init step counter and the per-loop
+   * integration counter (each tracks a different scope).
+   */
+  steps?: StepCounter
   promptText: string
   enable: () => Promise<void>
   disable: () => Promise<void>
 }): Promise<void> {
-  const want = await resolveYesNo(opts.ctx, opts.flag, opts.current, opts.promptText)
+  const promptText = opts.steps ? opts.steps.next(opts.promptText) : opts.promptText
+  const want = await resolveYesNo(opts.ctx, opts.flag, opts.defaultYes ?? opts.current, promptText)
   const suffix = opts.kind ? ` --type=${opts.kind}` : ''
   if (want) {
     await opts.enable()
@@ -61,6 +77,7 @@ export async function promptAutoRetrieveHook(
   self: { hooks: HookSurface },
   type: string,
   promptText: string,
+  steps?: StepCounter,
 ): Promise<void> {
   await promptHookToggle({
     ctx,
@@ -68,6 +85,7 @@ export async function promptAutoRetrieveHook(
     label: 'Auto-retrieval hook',
     integration: type,
     current: await self.hooks.isHookEnabled('auto-retrieve'),
+    steps,
     promptText,
     enable: () => self.hooks.enableHook('auto-retrieve'),
     disable: () => self.hooks.disableHook('auto-retrieve'),

@@ -152,6 +152,9 @@ Usage:
   mementos integration list                    List all known integrations
   mementos integration enable <name>           Install mementos into an integration
   mementos integration disable <name>          Uninstall from an integration
+  mementos integration configure               Re-run the interactive integration selection
+                                               (same prompts as init's integrations step; pre-checks
+                                               what's already installed, blind Enter keeps it).
   mementos integration hook enable | disable | status <name> [--type=auto-retrieve|pre-compact]
                                                Manage a client's hooks. claude-code, codex and
                                                antigravity-cli support the auto-retrieve hook (pre-inject

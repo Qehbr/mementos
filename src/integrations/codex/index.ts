@@ -14,6 +14,7 @@ import { MCP_SERVER_COMMAND, AUTO_RETRIEVE_COMMAND, SESSION_START_COMMAND } from
 import type { IntegrationImplementationModule } from '../registry.js'
 import type { InitContext } from '../../core/init-context/interface.js'
 import { promptAutoRetrieveHook, promptHookToggle } from '../_utils/prompt.js'
+import { StepCounter } from '../../cli/_utils/prompts.js'
 import { SKILL_MD, writeSkillFile } from '../_utils/skill.js'
 import { HookRegistry, jsonHooksAdapter, type HookSpec } from '../_utils/hook-registry.js'
 import { withInstallShell } from '../_utils/install-shell.js'
@@ -84,12 +85,15 @@ export class CodexIntegration implements ClientIntegration {
       { name: this.name, install: () => this.install(), isInstalled: () => this.isInstalled() },
       ctx,
       async () => {
+        const steps = new StepCounter(2)
         await promptAutoRetrieveHook(ctx, this, type,
-          'Enable Codex auto-retrieval hook? (pre-injects memories before every message; costs tokens on trivial turns)')
+          'Enable Codex auto-retrieval hook? (pre-injects memories before every message; costs tokens on trivial turns)', steps)
         await promptHookToggle({
           ctx, flag: `${type}-hook-session-start`, label: 'Session-start hook',
           integration: type, kind: 'session-start',
           current: await this.hooks.isHookEnabled('session-start'),
+          defaultYes: true,
+          steps,
           promptText: 'Enable Codex session-start hook? (loads the curated memory index ONCE at conversation start so you do not have to recall it; cheap.)',
           enable: () => this.hooks.enableHook('session-start'),
           disable: () => this.hooks.disableHook('session-start'),

@@ -66,7 +66,15 @@ export function create(machine: MachineConfig): StorageBackend {
 export async function setupAtInit(ctx: InitContext): Promise<void> {
   await ensurePackage('simple-git', s => ctx.print(s))
 
-  let remote = await promptRemoteUrl(ctx)
+  // Read the existing remote (if any) so `--reinit` pre-fills the input — blind
+  // Enter keeps the user's current setup. Falls back to undefined for fresh init.
+  const { readMachineConfigOrNull } = await import('../../core/config.js')
+  const machine = await readMachineConfigOrNull().catch(() => null)
+  const currentRemote = machine?.backend === 'git'
+    ? (machine.backendConfig as { remote?: unknown } | undefined)?.remote
+    : undefined
+
+  let remote = await promptRemoteUrl(ctx, typeof currentRemote === 'string' ? currentRemote : undefined)
   const { sshKeyPath, finalRemote } = await promptSshKey(ctx, remote)
   remote = finalRemote
 
@@ -78,13 +86,19 @@ export async function setupAtInit(ctx: InitContext): Promise<void> {
   })
 }
 
-/** Remote-URL prompt (flag-aware). Inquirer's `input.validate` rejects empty. */
-async function promptRemoteUrl(ctx: InitContext): Promise<string> {
+/** Remote-URL prompt (flag-aware). Inquirer's `input.validate` rejects empty.
+ *  When `current` is supplied (re-init), pre-fills the input AND annotates the
+ *  question with `(current)` so blind Enter keeps the existing remote. */
+async function promptRemoteUrl(ctx: InitContext, current?: string): Promise<string> {
   const fromFlag = ctx.getFlag('git-remote')
   if (fromFlag !== undefined && fromFlag !== '') return fromFlag
   const { input } = await import('@inquirer/prompts')
+  const message = current
+    ? 'Git remote URL (current):'
+    : 'Git remote URL (e.g. git@github.com:user/vault.git):'
   return await input({
-    message: 'Git remote URL (e.g. git@github.com:user/vault.git):',
+    message,
+    default: current,
     validate: (v: string) => v.trim().length > 0 || 'Remote URL is required',
   })
 }

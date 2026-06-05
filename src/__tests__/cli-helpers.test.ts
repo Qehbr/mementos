@@ -72,7 +72,7 @@ describe('promptChoice — non-interactive branches', () => {
     // Without the branch, inquirer would render a useless one-choice menu.
     const c = ctx()
     expect(await promptChoice(c, 'Vector index', 'index', regOf('hnsw'), 'hnsw')).toBe('hnsw')
-    expect(c.printed).toEqual(['Vector index: hnsw (only option)'])
+    expect(c.printed).toEqual(['✔ Vector index: hnsw (only option)'])
   })
 
   it('auto-picks even when the registry default does not match the only key', async () => {
@@ -80,7 +80,7 @@ describe('promptChoice — non-interactive branches', () => {
     // we still pick the only available impl — not the unreachable default.
     const c = ctx()
     expect(await promptChoice(c, 'Vector index', 'index', regOf('faiss'), 'hnsw')).toBe('faiss')
-    expect(c.printed).toEqual(['Vector index: faiss (only option)'])
+    expect(c.printed).toEqual(['✔ Vector index: faiss (only option)'])
   })
 
   it('flag overrides the auto-pick branch too (still respects the explicit choice)', async () => {

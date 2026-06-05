@@ -49,7 +49,7 @@ import type { KeyProviderImplementationModule } from '../../keys/registry.js'
 import type { RetrieverImplementationModule } from '../../retrievers/registry.js'
 import { CliInitContext } from '../init-context.js'
 import { requireImpl, refuseIfNonEmpty, runSetupAtInit } from '../_utils/vault.js'
-import { promptChoice, promptPath } from '../_utils/prompts.js'
+import { promptChoice, promptPath, StepCounter } from '../_utils/prompts.js'
 import { parseFlag } from '../_utils/flags.js'
 import { promptForExistingKey } from '../_utils/existing-key.js'
 import { ensureAllPlugins } from '../../core/plugins.js'
@@ -140,18 +140,26 @@ async function runInitNew(deps: InitDeps): Promise<void> {
   const existingVault = await readExistingVault(existing)
   await refuseFlagSwitches(existing, existingVault)
 
-  const backendType = await promptChoice(ctx, 'Storage backend', 'backend', storageReg, 'local')
+  // 7 numbered prompts here + integrations checkbox in setupIntegrations = 8.
   // Selection-time tips (e.g. local's OS-sync tip, openai's privacy note) are
   // fired by promptChoice itself — each impl module exports `describeSelectionTip`.
+  const steps = new StepCounter(8)
+  const backendType = await promptChoice(ctx, steps.next('Storage backend'), 'backend', storageReg,
+    { defaultType: 'local', currentValue: existing?.backend })
   const chosenVaultPath = await promptPath(
-    ctx, 'Where should the vault live?', 'vault-path',
-    existing?.vaultPath ?? vaultPath(),
+    ctx, steps.next('Where should the vault live?'), 'vault-path',
+    existing?.vaultPath ?? vaultPath(), existing?.vaultPath,
   )
-  const embedderType = await promptChoice(ctx, 'Embedder', 'embedder', embedderReg, 'minilm')
-  const indexType = await promptChoice(ctx, 'Vector index', 'index', indexReg, 'hnsw')
-  const retrieverType = await promptChoice(ctx, 'Retriever', 'retriever', retrieverReg, 'semantic')
-  const searcherType = await promptChoice(ctx, 'Searcher (lexical search — scan/trigram, or none to disable)', 'searcher', searcherReg, 'scan')
-  const keyType = await promptChoice(ctx, 'Key provider', 'key', keyReg, 'keychain')
+  const embedderType = await promptChoice(ctx, steps.next('Embedder'), 'embedder', embedderReg,
+    { defaultType: 'minilm', currentValue: existingVault?.vault.embedder })
+  const indexType = await promptChoice(ctx, steps.next('Vector index'), 'index', indexReg,
+    { defaultType: 'hnsw', currentValue: existing?.vectorIndex })
+  const retrieverType = await promptChoice(ctx, steps.next('Retriever'), 'retriever', retrieverReg,
+    { defaultType: 'semantic', currentValue: existing?.retriever })
+  const searcherType = await promptChoice(ctx, steps.next('Searcher (lexical search — scan/trigram, or none to disable)'),
+    'searcher', searcherReg, { defaultType: 'scan', currentValue: existing?.searcher })
+  const keyType = await promptChoice(ctx, steps.next('Key provider'), 'key', keyReg,
+    { defaultType: 'keychain', currentValue: existing?.keyProvider })
 
   const storageImpl = requireImpl(storageReg, backendType, 'storage backend')
   const embedderImpl = requireImpl(embedderReg, embedderType, 'embedder')
@@ -215,7 +223,7 @@ async function runInitNew(deps: InitDeps): Promise<void> {
   ctx.print(`Wrote ${machineConfigFile()}\n`)
 
   await runFullInstall(ctx, embedderReg, embedderType)
-  await setupIntegrations(ctx, integrationReg)
+  await setupIntegrations(ctx, integrationReg, steps)
 }
 
 // ─── Join existing vault flow ─────────────────────────────────────────────────
@@ -236,9 +244,11 @@ async function runInitJoin(deps: InitDeps): Promise<void> {
     process.exit(1)
   }
 
-  const backendType = await promptChoice(ctx, 'Storage backend', 'backend', storageReg, 'local')
+  // 7 numbered prompts here + integrations checkbox in setupIntegrations = 8.
+  const steps = new StepCounter(8)
+  const backendType = await promptChoice(ctx, steps.next('Storage backend'), 'backend', storageReg, 'local')
   const chosenVaultPath = await promptPath(
-    ctx, 'Where should the vault live on this machine?', 'vault-path', vaultPath(),
+    ctx, steps.next('Where should the vault live on this machine?'), 'vault-path', vaultPath(),
   )
 
   const storageImpl = requireImpl(storageReg, backendType, 'storage backend')
@@ -284,10 +294,11 @@ async function runInitJoin(deps: InitDeps): Promise<void> {
   const embedderImpl = requireImpl(embedderReg, embedderType, 'embedder')
   await runSetupAtInit(embedderImpl, ctx)
 
-  const indexType = await promptChoice(ctx, 'Vector index', 'index', indexReg, 'hnsw')
-  const retrieverType = await promptChoice(ctx, 'Retriever', 'retriever', retrieverReg, 'semantic')
-  const searcherType = await promptChoice(ctx, 'Searcher (lexical search — scan/trigram, or none to disable)', 'searcher', searcherReg, 'scan')
-  const keyType = await promptChoice(ctx, 'Key provider', 'key', keyReg, 'keychain')
+  const indexType = await promptChoice(ctx, steps.next('Vector index'), 'index', indexReg, 'hnsw')
+  const retrieverType = await promptChoice(ctx, steps.next('Retriever'), 'retriever', retrieverReg, 'semantic')
+  const searcherType = await promptChoice(ctx, steps.next('Searcher (lexical search — scan/trigram, or none to disable)'),
+    'searcher', searcherReg, 'scan')
+  const keyType = await promptChoice(ctx, steps.next('Key provider'), 'key', keyReg, 'keychain')
 
   const indexImpl = requireImpl(indexReg, indexType, 'vector index')
   const retrieverImpl = requireImpl(retrieverReg, retrieverType, 'retriever')
@@ -327,7 +338,7 @@ async function runInitJoin(deps: InitDeps): Promise<void> {
   ctx.print(`Wrote ${machineConfigFile()}\n`)
 
   await runFullInstall(ctx, embedderReg, embedderType)
-  await setupIntegrations(ctx, integrationReg)
+  await setupIntegrations(ctx, integrationReg, steps)
 }
 
 // ─── Shared helpers ───────────────────────────────────────────────────────────
@@ -428,9 +439,10 @@ async function refuseFlagSwitches(
  * Common integration-selection + setup flow shared by both new and join paths.
  * Real toggle (flag and checkbox): unlisted/unchecked installs are uninstalled.
  */
-async function setupIntegrations(
+export async function setupIntegrations(
   ctx: CliInitContext,
   integrationReg: Map<string, DiscoveredImpl<IntegrationFactory>>,
+  steps?: StepCounter,
 ): Promise<void> {
   const integrationFilter = parseFlag('integrations')
   let integrationImpls: DiscoveredImpl<IntegrationFactory>[] = []
@@ -453,9 +465,22 @@ async function setupIntegrations(
       ctx.print('No AI clients detected on this system. Skipping integration setup.')
       ctx.print('To install mementos into a client later:  mementos integration enable <name>')
     } else {
+      // Pre-check integrations that are CURRENTLY installed (re-init / reconfigure
+      // path) so blind Enter keeps the user's existing wiring.
+      const checkedState = await Promise.all(present.map(async p => ({
+        ...p,
+        checked: await p.impl.create().isInstalled().catch(() => false),
+      })))
+      const anyInstalled = checkedState.some(p => p.checked)
+      const message = steps?.next('AI clients detected. Which should mementos be wired into?')
+        ?? 'AI clients detected. Which should mementos be wired into?'
       const chosenTypes = await checkbox<string>({
-        message: 'AI clients detected. Which should mementos be wired into?',
-        choices: present.map(p => ({ name: p.name, value: p.impl.type, checked: true })),
+        message,
+        choices: checkedState.map(p => ({
+          name: anyInstalled && p.checked ? `${p.name} (current)` : p.name,
+          value: p.impl.type,
+          checked: anyInstalled ? p.checked : true,
+        })),
       })
       integrationImpls = chosenTypes.map(type => {
         const match = present.find(p => p.impl.type === type)
@@ -468,9 +493,10 @@ async function setupIntegrations(
     }
   }
 
-  for (const impl of integrationImpls) {
-    if (!impl.setupAtInit) continue
-    ctx.print(`\n─── ${impl.create().name} ───`)
+  const integrationsToConfigure = integrationImpls.filter(i => !!i.setupAtInit)
+  const integrationSteps = new StepCounter(integrationsToConfigure.length)
+  for (const impl of integrationsToConfigure) {
+    ctx.print(`\n─── ${integrationSteps.next(impl.create().name)} ───`)
     await runSetupAtInit(impl, ctx)
   }
 

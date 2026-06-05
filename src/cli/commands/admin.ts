@@ -114,6 +114,17 @@ export async function runIntegration(subcommand: string | undefined, args: strin
 
   const integrationReg = await loadIntegrations()
 
+  if (subcommand === 'configure') {
+    // Re-run the integration selection + setupAtInit loop without going through
+    // full --reinit. Currently-installed clients are pre-checked, unchecking
+    // uninstalls, checking installs. Selection-time tips and per-integration
+    // progress fire the same way they do in `mementos init`.
+    const { CliInitContext } = await import('../init-context.js')
+    const { setupIntegrations } = await import('./init.js')
+    await setupIntegrations(new CliInitContext(), integrationReg)
+    return
+  }
+
   if (subcommand === 'list') {
     if (integrationReg.size === 0) {
       console.log('No integrations registered.')
@@ -166,6 +177,6 @@ export async function runIntegration(subcommand: string | undefined, args: strin
     return
   }
 
-  console.error('Usage: mementos integration list | enable <name> | disable <name> | hook <enable|disable|status> <name>')
+  console.error('Usage: mementos integration list | enable <name> | disable <name> | configure | hook <enable|disable|status> <name>')
   process.exit(1)
 }
