@@ -12,15 +12,14 @@ import { safeUnlink, pathExists } from '../../core/_utils/fs.js'
 import { join } from 'node:path'
 import { homedir } from 'node:os'
 import { cliRunner, probeCli } from '../_utils/cli-runner.js'
-import type { ClientIntegration } from '../interface.js'
+import type { ClientIntegration, BinarySurface } from '../interface.js'
 import { MCP_SERVER_COMMAND, SESSION_START_COMMAND } from '../interface.js'
 import type { IntegrationImplementationModule } from '../registry.js'
 import type { InitContext } from '../../core/init-context/interface.js'
-import { resolveYesNo, promptHookToggle } from '../_utils/prompt.js'
+import { promptBinaryToggle, hookToggleMessages } from '../_utils/prompt.js'
 import { StepCounter } from '../../cli/_utils/prompts.js'
 import { SKILL_MD, writeSkillFile } from '../_utils/skill.js'
 import { HookRegistry, jsonHooksAdapter, type HookSpec } from '../_utils/hook-registry.js'
-import { withInstallShell } from '../_utils/install-shell.js'
 
 const claude = cliRunner('claude')
 const claudeMcp = (args: string[]) => claude(['mcp', ...args])
@@ -63,56 +62,64 @@ export class ClaudeCodeIntegration implements ClientIntegration {
     return pathExists(join(homedir(), '.claude'))
   }
 
-  /**
-   * Init-time flow. Each prompt defaults to its CURRENT state so `--reinit` is a real
-   * reconfigure (Enter keeps, No turns off).
-   */
-  async setupAtInit(ctx: InitContext): Promise<void> {
-    await withInstallShell(
-      { name: this.name, install: () => this.installMcpServer(), isInstalled: () => this.isInstalled() },
-      ctx,
-      async () => {
-        await this.promptSkill(ctx)
-        await this.promptHooks(ctx)
-      },
-    )
+  /** Skill BinarySurface — `promptBinaryToggle` drives this. */
+  readonly skill: BinarySurface = {
+    isInstalled: () => this.isSkillInstalled(),
+    install: () => this.installSkill(),
+    uninstall: () => this.uninstallSkill(),
   }
 
-  /** Real toggle — answering No to an installed skill removes it. */
-  private async promptSkill(ctx: InitContext): Promise<void> {
-    const skillOn = await this.isSkillInstalled()
-    const wantSkill = await resolveYesNo(ctx, `${type}-skill`, skillOn,
-      'Install the Claude Code skill file? (teaches Claude when/how to use the memory tools)')
-    if (wantSkill) {
-      await this.installSkill()
-      ctx.print(`Skill on — installed at ${this.skillPath}`)
-    } else {
-      await this.uninstallSkill()
-      ctx.print('Skill off — not installed.')
+  /** MCP-server BinarySurface — `promptBinaryToggle` drives this. */
+  readonly mcp: BinarySurface = {
+    isInstalled: () => this.isInstalled(),
+    install: () => this.installMcpServer(),
+    uninstall: () => this.removeMcpServer().catch(() => { /* not registered — fine */ }),
+  }
+
+  /**
+   * Init-time flow. Three opt-in surfaces, each a `promptBinaryToggle` driven
+   * by the matching `BinarySurface` field. Skill defaults Yes (it teaches the
+   * AI how to use mementos and is cheap); MCP defaults to current state so
+   * `--reinit` keeps it via blind Enter; hooks have their own per-kind defaults.
+   */
+  async setupAtInit(ctx: InitContext): Promise<void> {
+    try {
+      await promptBinaryToggle({
+        ctx, surface: this.mcp, flag: `${type}-mcp`,
+        promptText: 'Register the Claude Code MCP server? (Yes; or No to use the mementos CLI from Claude\'s Bash tool instead)',
+        installedMsg: 'MCP server: registered',
+        removedMsg: 'MCP server: removed (CLI + skill mode)',
+      })
+      await promptBinaryToggle({
+        ctx, surface: this.skill, flag: `${type}-skill`,
+        promptText: 'Install the Claude Code skill file? (teaches Claude when/how to use the memory tools)',
+        installedMsg: `Skill: installed at ${this.skillPath}`,
+        removedMsg: 'Skill: not installed',
+        defaultYes: true,
+      })
+      await this.promptHooks(ctx)
+    } catch (e) {
+      ctx.print(`Skipped ${this.name}: ${(e as Error).message}`)
     }
   }
 
   /** Real toggle — answering No to an enabled hook disables it. */
   private async promptHooks(ctx: InitContext): Promise<void> {
     const steps = new StepCounter(2)
-    await promptHookToggle({
-      ctx, flag: `${type}-hook-session-start`, label: 'Session-start hook',
-      integration: 'claude-code', kind: 'session-start',
-      current: await this.hooks.isHookEnabled('session-start'),
+    await promptBinaryToggle({
+      ctx, surface: this.hooks.hook('session-start'),
+      flag: `${type}-hook-session-start`,
+      promptText: 'Enable session-start hook? (loads the curated memory index ONCE at conversation start so you do not have to recall it; cheap.)',
+      ...hookToggleMessages('Session-start hook', type, 'session-start'),
       defaultYes: true,
       steps,
-      promptText: 'Enable session-start hook? (loads the curated memory index ONCE at conversation start so you do not have to recall it; cheap.)',
-      enable: () => this.hooks.enableHook('session-start'),
-      disable: () => this.hooks.disableHook('session-start'),
     })
-    await promptHookToggle({
-      ctx, flag: `${type}-hook-pre-compact`, label: 'Pre-compact hook',
-      integration: 'claude-code', kind: 'pre-compact',
-      current: await this.hooks.isHookEnabled('pre-compact'),
-      steps,
+    await promptBinaryToggle({
+      ctx, surface: this.hooks.hook('pre-compact'),
+      flag: `${type}-hook-pre-compact`,
       promptText: 'Enable pre-compact hook? (snapshots the conversation into the vault before Claude Code compacts long context)',
-      enable: () => this.hooks.enableHook('pre-compact'),
-      disable: () => this.hooks.disableHook('pre-compact'),
+      ...hookToggleMessages('Pre-compact hook', type, 'pre-compact'),
+      steps,
     })
   }
 

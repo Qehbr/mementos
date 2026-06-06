@@ -22,11 +22,12 @@ import { rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { homedir } from 'node:os'
 import { pathExists } from '../../core/_utils/fs.js'
-import type { ClientIntegration } from '../interface.js'
+import type { ClientIntegration, BinarySurface } from '../interface.js'
 import { mcpServerEntry } from '../interface.js'
 import type { IntegrationImplementationModule } from '../registry.js'
-import { defaultSetupAtInit } from '../_utils/default-setup.js'
+import type { InitContext } from '../../core/init-context/interface.js'
 import { SKILL_MD, writeSkillFile } from '../_utils/skill.js'
+import { promptBinaryToggle } from '../_utils/prompt.js'
 import { readJsonConfig, writeJsonConfig } from '../_utils/json-config.js'
 
 // ─── Discovery contract ───────────────────────────────────────────────────────
@@ -34,7 +35,7 @@ export const type = 'antigravity-cli'
 export function create(): ClientIntegration {
   return new AntigravityCliIntegration()
 }
-export const setupAtInit = defaultSetupAtInit(create)
+export const setupAtInit = (ctx: InitContext) => new AntigravityCliIntegration().setupAtInit(ctx)
 const _shape: IntegrationImplementationModule = { type, create, setupAtInit }
 
 interface ImportManifestEntry {
@@ -85,17 +86,17 @@ export class AntigravityCliIntegration implements ClientIntegration {
     return join(this.geminiDir, 'config', 'import_manifest.json')
   }
 
-  /** Install bundle: plugin manifest + skill file + import-manifest entry. Idempotent. */
+  /** Install bundle: plugin manifest + skill file + register-with-agy. Idempotent. */
   async install(): Promise<void> {
-    await this.writePluginManifest()
+    await this.writePluginManifest({ withMcp: true })
     await writeSkillFile(this.skillDir, 'SKILL.md', SKILL_MD)
-    await this.addToImportManifest()
+    await this.registerPluginWithAgy()
   }
 
-  /** Remove the plugin directory and the import-manifest entry. Idempotent. */
+  /** Remove the plugin directory and the agy registration. Idempotent. */
   async uninstall(): Promise<void> {
     await rm(this.pluginDir, { recursive: true, force: true })
-    await this.removeFromImportManifest()
+    await this.unregisterPluginFromAgy()
   }
 
   /** Whether our plugin.json is on disk — what `agy plugin list` ultimately reflects. */
@@ -108,27 +109,90 @@ export class AntigravityCliIntegration implements ClientIntegration {
   }
 
   /**
-   * Write plugin.json with the MCP server entry and our metadata. Reads the
-   * existing file first so a malformed JSON (typo, partial write) fails loud
-   * instead of being silently overwritten — same defensive posture as every
-   * other config-touching path.
+   * Skill BinarySurface. install() also calls `registerPluginWithAgy()` —
+   * without that, the plugin dir exists but `agy plugin list` doesn't see it,
+   * so the skill is invisible to the CLI.
    */
-  private async writePluginManifest(): Promise<void> {
+  readonly skill: BinarySurface = {
+    isInstalled: () => pathExists(join(this.skillDir, 'SKILL.md')),
+    install: async () => {
+      await writeSkillFile(this.skillDir, 'SKILL.md', SKILL_MD)
+      await this.registerPluginWithAgy()
+    },
+    uninstall: () => rm(this.skillDir, { recursive: true, force: true }),
+  }
+
+  /**
+   * MCP BinarySurface. install/uninstall both write plugin.json (with/without
+   * `mcpServers`) and register with agy — the plugin.json metadata must exist
+   * for agy to discover the plugin at all, even in MCP-off mode.
+   */
+  readonly mcp: BinarySurface = {
+    isInstalled: () => this.isMcpRegistered(),
+    install: async () => {
+      await this.writePluginManifest({ withMcp: true })
+      await this.registerPluginWithAgy()
+    },
+    uninstall: async () => {
+      await this.writePluginManifest({ withMcp: false })
+      await this.registerPluginWithAgy()
+    },
+  }
+
+  /**
+   * Init-time flow. Skill defaults Yes (foundational); MCP defaults to current
+   * state so `--reinit` keeps it via blind Enter.
+   */
+  async setupAtInit(ctx: InitContext): Promise<void> {
+    try {
+      await promptBinaryToggle({
+        ctx, surface: this.mcp, flag: `${type}-mcp`,
+        promptText: 'Register the Antigravity CLI MCP server? (Yes; or No to use the mementos CLI from Antigravity\'s shell tool instead)',
+        installedMsg: 'MCP server: registered',
+        removedMsg: 'MCP server: removed (CLI + skill mode)',
+      })
+      await promptBinaryToggle({
+        ctx, surface: this.skill, flag: `${type}-skill`,
+        promptText: 'Install the Antigravity CLI skill file? (teaches Antigravity when/how to use the memory tools)',
+        installedMsg: `Skill: installed at ${join(this.skillDir, 'SKILL.md')}`,
+        removedMsg: 'Skill: not installed',
+        defaultYes: true,
+      })
+    } catch (e) {
+      ctx.print(`Skipped ${this.name}: ${(e as Error).message}`)
+    }
+  }
+
+  /** Whether mcpServers.mementos is present in the current plugin.json. */
+  private async isMcpRegistered(): Promise<boolean> {
+    if (!await pathExists(this.pluginManifestPath)) return false
+    const manifest = await readJsonConfig<Partial<PluginManifest>>(this.pluginManifestPath, {})
+    return manifest.mcpServers !== undefined && PLUGIN_NAME in manifest.mcpServers
+  }
+
+  /**
+   * Write plugin.json with our metadata and (optionally) the MCP server entry.
+   * Reads the existing file first so a malformed JSON (typo, partial write)
+   * fails loud instead of being silently overwritten.
+   */
+  private async writePluginManifest(opts: { withMcp: boolean }): Promise<void> {
     await readJsonConfig<Partial<PluginManifest>>(this.pluginManifestPath, {})
     const manifest: PluginManifest = {
       name: PLUGIN_NAME,
       version: PLUGIN_VERSION,
       description: PLUGIN_DESCRIPTION,
-      mcpServers: { [PLUGIN_NAME]: mcpServerEntry() },
+      ...(opts.withMcp ? { mcpServers: { [PLUGIN_NAME]: mcpServerEntry() } } : {}),
     }
     await writeJsonConfig(this.pluginManifestPath, manifest)
   }
 
   /**
-   * Add an entry to import_manifest.json so `agy plugin list` reports our plugin. Preserves
-   * every other plugin entry — a user may have imported others via `agy plugin install`.
+   * Register the plugin with `agy` by adding an entry to import_manifest.json.
+   * `agy plugin list` reads from this file; without an entry, the plugin
+   * directory exists but is invisible to the CLI. Idempotent — preserves every
+   * other plugin entry (the user may have imported others via `agy plugin install`).
    */
-  private async addToImportManifest(): Promise<void> {
+  private async registerPluginWithAgy(): Promise<void> {
     const manifest = await readJsonConfig<ImportManifest>(this.importManifestPath, {})
     const imports = manifest.imports ?? []
     if (!imports.some(e => e.name === PLUGIN_NAME)) {
@@ -142,7 +206,7 @@ export class AntigravityCliIntegration implements ClientIntegration {
     await writeJsonConfig(this.importManifestPath, { ...manifest, imports })
   }
 
-  private async removeFromImportManifest(): Promise<void> {
+  private async unregisterPluginFromAgy(): Promise<void> {
     if (!await pathExists(this.importManifestPath)) return
     const manifest = await readJsonConfig<ImportManifest>(this.importManifestPath, {})
     const imports = (manifest.imports ?? []).filter(e => e.name !== PLUGIN_NAME)

@@ -12,7 +12,11 @@
  * at runtime to find what's available.
  */
 import { runInit } from './commands/init.js'
-import { runServe, runSessionStart, runList, runGet, runDelete, runSync, runSearch } from './commands/runtime.js'
+import {
+  runServe, runSessionStart,
+  runList, runGet, runDelete, runSync, runSearch,
+  runRecall, runWrite, runUpdate, runTags, runChronicle, runChronicles, runIndex,
+} from './commands/runtime.js'
 import { runIntegration } from './commands/admin.js'
 import { runShareKey } from './commands/share-key.js'
 import { runDestroy } from './commands/destroy.js'
@@ -56,6 +60,13 @@ try {
     case 'delete':      await runDelete(subcommand); break
     case 'search':      await runSearch(subcommand, args); break
     case 'sync':        await runSync(); break
+    case 'recall':      await runRecall(subcommand, args); break
+    case 'write':       await runWrite(subcommand, args); break
+    case 'update':      await runUpdate(subcommand, args); break
+    case 'tags':        await runTags(); break
+    case 'chronicle':   await runChronicle(subcommand); break
+    case 'chronicles':  await runChronicles(); break
+    case 'index':       await runIndex(subcommand, args); break
     case 'integration': await runIntegration(subcommand, args); break
     case 'share-key':   await runShareKey(); break
     case 'destroy':     await runDestroy(); break
@@ -150,8 +161,30 @@ Usage:
                                  --codex-hook-auto-retrieve=off
 
   mementos serve                               Start the MCP server (called by AI tools)
-  mementos list [tag...]                       List stored memories
+
+  # Recall + write (mirror the MCP tools; shell-capable AI clients can use these
+  # instead of MCP via their Bash/Shell tool).
+  mementos recall <query> [--k=N] [--tags=a,b] [--exclude-tags=a,b] [--chronicle=id]
+                                               Semantic search for relevant mementos.
+  mementos write <text> [--tags=a,b]           Store a new memento. Text via positional
+                                               OR piped stdin: \`echo "text" | mementos write\`.
+  mementos update <id> <text> [--tags=a,b]     Replace a memento's text (id and any
+                                               un-passed tags preserved). Text via positional
+                                               OR piped stdin.
+  mementos tags                                List every tag in use with its usage count.
+
+  # Read paths
+  mementos list [tag...] [--tags=a,b] [--start=YYYY-MM-DD] [--end=...] [--query=...] [--k=N]
+                                               List mementos. With dates/query: ranked by
+                                               recency or semantic relevance over a range.
+                                               With tags: filter by tag (positional or --tags).
   mementos get <id>                            Show full text of a memory by id
+  mementos chronicle <id>                      Read every memento of one conversation
+                                               (chronicle) in order, with forks annotated.
+  mementos chronicles                          List every chronicle with memento count + start time.
+  mementos index [<text>]                      Read the curated memory-index memento, or
+                                               replace its body when text is given (positional
+                                               or piped stdin).
   mementos delete <id>                         Delete a memory by id.
   mementos search <query> [--regex] [--k=N] [--context=N] [--case-sensitive]
                                                Exact-text search across all mementos —

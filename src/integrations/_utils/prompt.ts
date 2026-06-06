@@ -22,47 +22,65 @@ export async function resolveYesNo(
 }
 
 /**
- * Standard hook-toggle prompt: resolve yes/no, apply, then print a consistent "Disable
- * later with: mementos integration hook ..." follow-up. Locks the user-facing phrasing
- * to one place across every hook-having integration.
+ * Generic binary-toggle prompt — drives any `BinarySurface` field on an
+ * integration (skill, MCP server, …). Same shape as `promptHookToggle` but
+ * single-resource instead of kind-keyed.
+ *
+ * `--<flag>=on|off` skips the prompt for scripted setup. `defaultYes` overrides
+ * the prompt's default Yes/No regardless of `current` — use for foundational
+ * pieces like the skill that we want on by default for new installs.
+ * `current` (omitted = read from surface) drives the default when `defaultYes`
+ * isn't set, so blind Enter keeps a user's existing choice on `--reinit`.
+ *
+ * The action is ALWAYS invoked (both install + uninstall are required to be
+ * idempotent) — integrations may need a side-effect even when the abstract
+ * "installed" state already matches (e.g. Antigravity's plugin.json carries
+ * name/version metadata alongside the MCP entry, so a fresh MCP-off install
+ * still needs the file written).
  */
-export async function promptHookToggle(opts: {
-  ctx: InitContext
-  flag: string
-  /** Sentence-case label that opens the printed status (e.g. "Auto-retrieval hook"). */
-  label: string
-  /** Integration name as it appears in the `mementos integration hook (en|dis)able <X>` command. */
-  integration: string
-  /** Hook kind for the `--type=K` suffix on the follow-up command; omitted = no suffix. */
-  kind?: string
-  current: boolean
-  /**
-   * Override the prompt's default Yes/No regardless of `current`. Use for hooks
-   * we want enabled by default for new installs (e.g. session-start, which is
-   * cheap and high-value). When omitted, the default tracks `current` — i.e.
-   * blind-Enter keeps the user's existing choice on re-init.
-   */
-  defaultYes?: boolean
-  /**
-   * Optional per-integration step counter — prefixes the prompt with
-   * `[▰▰▱▱] N/M` so the user sees where they are inside ONE integration's
-   * questions. Distinct from the global init step counter and the per-loop
-   * integration counter (each tracks a different scope).
-   */
-  steps?: StepCounter
-  promptText: string
-  enable: () => Promise<void>
-  disable: () => Promise<void>
-}): Promise<void> {
-  const promptText = opts.steps ? opts.steps.next(opts.promptText) : opts.promptText
-  const want = await resolveYesNo(opts.ctx, opts.flag, opts.defaultYes ?? opts.current, promptText)
-  const suffix = opts.kind ? ` --type=${opts.kind}` : ''
-  if (want) {
-    await opts.enable()
-    opts.ctx.print(`${opts.label} on. Disable later with: mementos integration hook disable ${opts.integration}${suffix}`)
-  } else {
-    await opts.disable()
-    opts.ctx.print(`${opts.label} off. Enable later with: mementos integration hook enable ${opts.integration}${suffix}`)
+/**
+ * Standard pair of installed/removed messages for a hook toggle — keeps the
+ * "Disable later with: mementos integration hook ..." phrasing consistent
+ * across every hook-having integration. Pass the result's `installedMsg` /
+ * `removedMsg` straight into `promptBinaryToggle`.
+ *
+ *   const msgs = hookToggleMessages('Session-start hook', 'claude-code', 'session-start')
+ *   await promptBinaryToggle({ ..., installedMsg: msgs.installedMsg, removedMsg: msgs.removedMsg })
+ */
+export function hookToggleMessages(
+  label: string, integration: string, kind: string,
+): { installedMsg: string; removedMsg: string } {
+  const suffix = ` --type=${kind}`
+  return {
+    installedMsg: `${label} on. Disable later with: mementos integration hook disable ${integration}${suffix}`,
+    removedMsg: `${label} off. Enable later with: mementos integration hook enable ${integration}${suffix}`,
   }
 }
 
+export async function promptBinaryToggle(opts: {
+  ctx: InitContext
+  surface: import('../interface.js').BinarySurface
+  /** CLI flag suffix for scripted setup — e.g. `'claude-code-mcp'`. */
+  flag: string
+  /** Client-facing prompt sentence (e.g. "Register the Claude Code MCP server?"). */
+  promptText: string
+  /** Message printed when the component ends up installed (in past tense). */
+  installedMsg: string
+  /** Message printed when the component ends up removed. */
+  removedMsg: string
+  /** Per-integration step counter for the `[bar] N/M` prefix. */
+  steps?: StepCounter
+  /** Force the default Yes for foundational components (skill); omit to track `current`. */
+  defaultYes?: boolean
+}): Promise<void> {
+  const installed = await opts.surface.isInstalled()
+  const promptText = opts.steps ? opts.steps.next(opts.promptText) : opts.promptText
+  const want = await resolveYesNo(opts.ctx, opts.flag, opts.defaultYes ?? installed, promptText)
+  if (want) {
+    await opts.surface.install()
+    opts.ctx.print(opts.installedMsg)
+  } else {
+    await opts.surface.uninstall()
+    opts.ctx.print(opts.removedMsg)
+  }
+}

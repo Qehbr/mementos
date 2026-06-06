@@ -41,15 +41,33 @@ export function mcpServerEntry(): { command: string; args: string[] } {
  * `supportedHooks()`. `HookRegistry` implements this; integrations expose it as
  * `readonly hooks`.
  */
+/**
+ * Registry of per-kind hook toggles. Each kind is itself a `BinarySurface`, so
+ * `promptBinaryToggle` drives skill / MCP / hook toggles through one helper:
+ *   promptBinaryToggle({ surface: integration.hooks.hook('session-start'), … })
+ */
 export interface HookSurface {
   /** Hook kinds this integration supports. Used by `mementos integration hook` for --type validation. */
   supportedHooks(): readonly string[]
-  /** Whether the named hook is currently registered. */
-  isHookEnabled(kind: string): Promise<boolean>
-  /** Register a hook of the given kind. Throws on unknown kinds. */
-  enableHook(kind: string): Promise<void>
-  /** Remove a hook of the given kind. Idempotent. Accepts a pre-loaded settings object for batched writes. */
-  disableHook(kind: string, settings?: Record<string, unknown>): Promise<void>
+  /** Return the BinarySurface for one hook kind. Throws on unknown kinds. */
+  hook(kind: string): BinarySurface
+  /** Strip every hook kind in one batched read/write — the uninstall clean-slate. */
+  disableAllHooks(): Promise<void>
+}
+
+/**
+ * One install/uninstall pair for any binary-toggle component (MCP server, skill
+ * file, …). Same shape `HookSurface` has but for a single resource rather than
+ * a kind-keyed registry. `promptBinaryToggle` (in `_utils/prompt.ts`) drives
+ * any field of this shape with a consistent yes/no prompt.
+ */
+export interface BinarySurface {
+  /** Whether this component is currently installed. */
+  isInstalled(): Promise<boolean>
+  /** Install the component. Idempotent — safe to call when already installed. */
+  install(): Promise<void>
+  /** Remove the component. Idempotent — safe to call when already absent. */
+  uninstall(): Promise<void>
 }
 
 export interface ClientIntegration {
@@ -71,6 +89,10 @@ export interface ClientIntegration {
    */
   isClientPresent(): Promise<boolean>
 
+  /** MCP server registration surface — optional toggle in `setupAtInit`. */
+  readonly mcp?: BinarySurface
+  /** Skill file surface — optional toggle in `setupAtInit`. */
+  readonly skill?: BinarySurface
   /** Hook lifecycle, if this client fires shell commands around AI events. */
   readonly hooks?: HookSurface
 }

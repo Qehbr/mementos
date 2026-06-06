@@ -64,8 +64,8 @@ try {
   }
   pass(`supportedHooks() reports ${JSON.stringify(expectedHooks)}`)
 
-  await integration.hooks.enableHook('session-start')
-  if (!await integration.hooks.isHookEnabled('session-start')) fail('isHookEnabled() false right after enableHook()')
+  await integration.hooks.hook('session-start').install()
+  if (!await integration.hooks.hook('session-start').isInstalled()) fail('isHookEnabled() false right after enableHook()')
   pass('enableHook() registered the hook')
 
   const hooksRaw = await readFile(hooksPath, 'utf8').catch(() => fail(`hooks.json not written at ${hooksPath}`))
@@ -86,17 +86,17 @@ try {
   await codex(['mcp', 'list']).catch(e => fail(`'codex mcp list' failed with hooks.json present: ${String(e)}`))
   pass('codex CLI still runs with hooks.json present')
 
-  await integration.hooks.disableHook('session-start')
-  if (await integration.hooks.isHookEnabled('session-start')) fail('isHookEnabled() still true after disableHook()')
+  await integration.hooks.hook('session-start').uninstall()
+  if (await integration.hooks.hook('session-start').isInstalled()) fail('isHookEnabled() still true after disableHook()')
   pass('disableHook() removed the hook')
 
   console.log('\nuninstall()')
-  await integration.hooks.enableHook('session-start')
+  await integration.hooks.hook('session-start').install()
   await integration.uninstall()
   if (await integration.isInstalled()) fail('isInstalled() is still true after uninstall()')
   pass('isInstalled() reports false')
 
-  if (await integration.hooks.isHookEnabled('session-start')) fail('hook still enabled after uninstall()')
+  if (await integration.hooks.hook('session-start').isInstalled()) fail('hook still enabled after uninstall()')
   pass('uninstall() stripped the hook')
 
   const listAfterUninstall = await codex(['mcp', 'list']).catch(() => '')

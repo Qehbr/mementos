@@ -1,4 +1,4 @@
-import type { HookSurface } from '../interface.js'
+import type { BinarySurface, HookSurface } from '../interface.js'
 import { matchesCommand } from './match-command.js'
 import { readJsonConfig, writeJsonConfig } from './json-config.js'
 
@@ -88,14 +88,37 @@ export class HookRegistry implements HookSurface {
     return s
   }
 
-  async isHookEnabled(kind: string): Promise<boolean> {
+  /**
+   * Return a `BinarySurface` for one hook kind — same shape skill + MCP expose,
+   * so `promptBinaryToggle` drives all three uniformly. Throws if the kind isn't
+   * declared in `supportedHooks()`.
+   */
+  hook(kind: string): BinarySurface {
     const s = this.spec(kind)
+    return {
+      isInstalled: () => this.isHookEnabled(s),
+      install: () => this.enableHook(s),
+      uninstall: () => this.disableHook(s),
+    }
+  }
+
+  /** Strip every supported hook kind in one batched read/write — the uninstall clean-slate. */
+  async disableAllHooks(): Promise<void> {
+    const config = await this.adapter.read()
+    for (const kind of this.supportedHooks()) {
+      await this.disableHookInline(this.spec(kind), config)
+    }
+    await this.adapter.write(config)
+  }
+
+  // ─── Internals ────────────────────────────────────────────────────────────
+
+  private async isHookEnabled(s: HookSpec): Promise<boolean> {
     const config = await this.adapter.read()
     return this.adapter.readGroups(config, s.event)?.some(g => this.hasCommand(g, s.baseCommand)) ?? false
   }
 
-  async enableHook(kind: string): Promise<void> {
-    const s = this.spec(kind)
+  private async enableHook(s: HookSpec): Promise<void> {
     const config = await this.adapter.read()
     const groups = (this.adapter.readGroups(config, s.event) ?? []).filter(g => !this.hasCommand(g, s.baseCommand))
     groups.push(this.adapter.newGroup(s))
@@ -103,23 +126,16 @@ export class HookRegistry implements HookSurface {
     await this.adapter.write(config)
   }
 
-  /**
-   * Caller may pass a pre-loaded `settings` to batch multiple disables into one write
-   * (e.g. uninstall strips every kind before writing once).
-   */
-  async disableHook(kind: string, settings?: Record<string, unknown>): Promise<void> {
-    const s = this.spec(kind)
-    const c = settings ?? await this.adapter.read()
-    const groups = this.adapter.readGroups(c, s.event)
-    if (groups) this.adapter.writeGroups(c, s.event, groups.filter(g => !this.hasCommand(g, s.baseCommand)))
-    if (!settings) await this.adapter.write(c)
+  private async disableHook(s: HookSpec): Promise<void> {
+    const config = await this.adapter.read()
+    await this.disableHookInline(s, config)
+    await this.adapter.write(config)
   }
 
-  /** Strip every supported hook kind in one batched read/write — the uninstall clean-slate. */
-  async disableAllHooks(): Promise<void> {
-    const config = await this.adapter.read()
-    for (const kind of this.supportedHooks()) await this.disableHook(kind, config)
-    await this.adapter.write(config)
+  /** Strip a single hook without writing — used by `disableAllHooks` to batch. */
+  private async disableHookInline(s: HookSpec, config: Record<string, unknown>): Promise<void> {
+    const groups = this.adapter.readGroups(config, s.event)
+    if (groups) this.adapter.writeGroups(config, s.event, groups.filter(g => !this.hasCommand(g, s.baseCommand)))
   }
 
   private hasCommand(group: GroupWithCommands, baseCommand: string): boolean {

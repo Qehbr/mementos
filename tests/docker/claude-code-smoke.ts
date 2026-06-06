@@ -63,15 +63,15 @@ try {
   // ── hooks (session-start, pre-compact) — settings.json edits ────────────
   console.log('\nhooks')
   for (const kind of integration.hooks.supportedHooks()) {
-    await integration.hooks.enableHook(kind)
-    if (!await integration.hooks.isHookEnabled(kind)) fail(`isHookEnabled('${kind}') false after enableHook`)
+    await integration.hooks.hook(kind).install()
+    if (!await integration.hooks.hook(kind).isInstalled()) fail(`isHookEnabled('${kind}') false after enableHook`)
     const settings = await readFile(settingsPath, 'utf8').catch(() => '')
     if (!settings.includes('mementos')) fail(`settings.json carries no mementos entry after enabling '${kind}'`)
     pass(`enableHook('${kind}') registered in settings.json`)
   }
   for (const kind of integration.hooks.supportedHooks()) {
-    await integration.hooks.disableHook(kind)
-    if (await integration.hooks.isHookEnabled(kind)) fail(`isHookEnabled('${kind}') still true after disableHook`)
+    await integration.hooks.hook(kind).uninstall()
+    if (await integration.hooks.hook(kind).isInstalled()) fail(`isHookEnabled('${kind}') still true after disableHook`)
     pass(`disableHook('${kind}') cleared`)
   }
 

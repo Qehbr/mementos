@@ -95,17 +95,17 @@ async function runIntegrationHook(args: string[]): Promise<void> {
       process.exit(1)
     }
 
-    await target.integration.hooks.enableHook(kind)
-    const blurb = kind === 'auto-retrieve'
-      ? `auto-retrieve memories before each ${target.integration.name} message`
+    await target.integration.hooks.hook(kind).install()
+    const blurb = kind === 'session-start'
+      ? `load the curated memory index ONCE at conversation start in ${target.integration.name}`
       : `snapshot the conversation before ${target.integration.name} compacts long context`
     console.log(`Hook enabled (${kind}) for ${target.integration.name} — mementos will ${blurb}.`)
     console.log(`Disable anytime with: mementos integration hook disable ${name} --type=${kind}`)
   } else if (verb === 'disable') {
-    await target.integration.hooks.disableHook(kind)
+    await target.integration.hooks.hook(kind).uninstall()
     console.log(`Hook disabled (${kind}) for ${target.integration.name}.`)
   } else {
-    const enabled = await target.integration.hooks.isHookEnabled(kind)
+    const enabled = await target.integration.hooks.hook(kind).isInstalled()
     console.log(`${target.integration.name} ${kind} hook: ${enabled ? 'enabled' : 'disabled'}`)
   }
 }

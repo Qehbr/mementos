@@ -32,7 +32,7 @@ describe('ClaudeCodeIntegration hooks (session-start + pre-compact)', () => {
   it('enableHook(session-start) writes a SessionStart entry with `mementos session-start`', async () => {
     const { ClaudeCodeIntegration } = await import('../../integrations/claude-code/index.js')
     const integ = new ClaudeCodeIntegration()
-    await integ.hooks.enableHook('session-start')
+    await integ.hooks.hook('session-start').install()
 
     const settings = await readSettings()
     const hooks = settings.hooks as Record<string, Array<{ hooks?: Array<{ command?: string }> }>>
@@ -41,13 +41,13 @@ describe('ClaudeCodeIntegration hooks (session-start + pre-compact)', () => {
     // The retired UserPromptSubmit (auto-retrieve) event must never reappear.
     expect(hooks.UserPromptSubmit).toBeUndefined()
     expect(hooks.PreCompact).toBeUndefined()
-    expect(await integ.hooks.isHookEnabled('session-start')).toBe(true)
+    expect(await integ.hooks.hook('session-start').isInstalled()).toBe(true)
   })
 
   it('enableHook(pre-compact) writes a PreCompact entry with `mementos snapshot`', async () => {
     const { ClaudeCodeIntegration } = await import('../../integrations/claude-code/index.js')
     const integ = new ClaudeCodeIntegration()
-    await integ.hooks.enableHook('pre-compact')
+    await integ.hooks.hook('pre-compact').install()
 
     const settings = await readSettings()
     const hooks = settings.hooks as Record<string, Array<{ hooks?: Array<{ command?: string }> }>>
@@ -55,34 +55,34 @@ describe('ClaudeCodeIntegration hooks (session-start + pre-compact)', () => {
     expect(hooks.PreCompact[0].hooks?.[0].command).toBe('mementos snapshot')
     expect(hooks.UserPromptSubmit).toBeUndefined()
     expect(hooks.SessionStart).toBeUndefined()
-    expect(await integ.hooks.isHookEnabled('pre-compact')).toBe(true)
+    expect(await integ.hooks.hook('pre-compact').isInstalled()).toBe(true)
   })
 
   it('both hooks coexist; each disable only touches its own event', async () => {
     const { ClaudeCodeIntegration } = await import('../../integrations/claude-code/index.js')
     const integ = new ClaudeCodeIntegration()
-    await integ.hooks.enableHook('session-start')
-    await integ.hooks.enableHook('pre-compact')
+    await integ.hooks.hook('session-start').install()
+    await integ.hooks.hook('pre-compact').install()
 
     let settings = await readSettings()
     let hooks = settings.hooks as Record<string, unknown[]>
     expect(hooks.SessionStart).toBeDefined()
     expect(hooks.PreCompact).toBeDefined()
 
-    await integ.hooks.disableHook('pre-compact')
+    await integ.hooks.hook('pre-compact').uninstall()
     settings = await readSettings()
     hooks = settings.hooks as Record<string, unknown[]>
     expect(hooks.SessionStart).toBeDefined()
     expect((hooks.PreCompact as unknown[] | undefined)?.length ?? 0).toBe(0)
-    expect(await integ.hooks.isHookEnabled('session-start')).toBe(true)
-    expect(await integ.hooks.isHookEnabled('pre-compact')).toBe(false)
+    expect(await integ.hooks.hook('session-start').isInstalled()).toBe(true)
+    expect(await integ.hooks.hook('pre-compact').isInstalled()).toBe(false)
   })
 
   it('enable is idempotent — re-enabling the same kind does not duplicate the entry', async () => {
     const { ClaudeCodeIntegration } = await import('../../integrations/claude-code/index.js')
     const integ = new ClaudeCodeIntegration()
-    await integ.hooks.enableHook('pre-compact')
-    await integ.hooks.enableHook('pre-compact')
+    await integ.hooks.hook('pre-compact').install()
+    await integ.hooks.hook('pre-compact').install()
 
     const settings = await readSettings()
     const hooks = settings.hooks as Record<string, Array<unknown>>
@@ -92,17 +92,17 @@ describe('ClaudeCodeIntegration hooks (session-start + pre-compact)', () => {
   it('disableHook(both kinds in turn) ends up with both events empty', async () => {
     const { ClaudeCodeIntegration } = await import('../../integrations/claude-code/index.js')
     const integ = new ClaudeCodeIntegration()
-    await integ.hooks.enableHook('session-start')
-    await integ.hooks.enableHook('pre-compact')
+    await integ.hooks.hook('session-start').install()
+    await integ.hooks.hook('pre-compact').install()
 
-    await integ.hooks.disableHook('session-start')
-    await integ.hooks.disableHook('pre-compact')
+    await integ.hooks.hook('session-start').uninstall()
+    await integ.hooks.hook('pre-compact').uninstall()
 
     const settings = await readSettings()
     const hooks = settings.hooks as Record<string, Array<unknown> | undefined>
     expect((hooks?.SessionStart ?? []).length).toBe(0)
     expect((hooks?.PreCompact ?? []).length).toBe(0)
-    expect(await integ.hooks.isHookEnabled('session-start')).toBe(false)
-    expect(await integ.hooks.isHookEnabled('pre-compact')).toBe(false)
+    expect(await integ.hooks.hook('session-start').isInstalled()).toBe(false)
+    expect(await integ.hooks.hook('pre-compact').isInstalled()).toBe(false)
   })
 })

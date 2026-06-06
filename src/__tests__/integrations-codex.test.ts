@@ -121,10 +121,10 @@ describe('CodexIntegration', () => {
   it('enableHook writes a SessionStart command hook to hooks.json', async () => {
     const { CodexIntegration } = await import('../integrations/codex/index.js')
     const integ = new CodexIntegration()
-    expect(await integ.hooks.isHookEnabled('session-start')).toBe(false)
+    expect(await integ.hooks.hook('session-start').isInstalled()).toBe(false)
 
-    await integ.hooks.enableHook('session-start')
-    expect(await integ.hooks.isHookEnabled('session-start')).toBe(true)
+    await integ.hooks.hook('session-start').install()
+    expect(await integ.hooks.hook('session-start').isInstalled()).toBe(true)
 
     const file = JSON.parse(await readFile(hooksPath(), 'utf8')) as {
       hooks: Record<string, Array<{ hooks: Array<{ type: string; command: string }> }>>
@@ -139,8 +139,8 @@ describe('CodexIntegration', () => {
   it('enableHook is idempotent — no duplicate entry on second call', async () => {
     const { CodexIntegration } = await import('../integrations/codex/index.js')
     const integ = new CodexIntegration()
-    await integ.hooks.enableHook('session-start')
-    await integ.hooks.enableHook('session-start')
+    await integ.hooks.hook('session-start').install()
+    await integ.hooks.hook('session-start').install()
     const file = JSON.parse(await readFile(hooksPath(), 'utf8')) as {
       hooks: Record<string, unknown[]>
     }
@@ -155,10 +155,10 @@ describe('CodexIntegration', () => {
     }), 'utf8')
 
     const integ = new CodexIntegration()
-    await integ.hooks.enableHook('session-start')
-    await integ.hooks.disableHook('session-start')
+    await integ.hooks.hook('session-start').install()
+    await integ.hooks.hook('session-start').uninstall()
 
-    expect(await integ.hooks.isHookEnabled('session-start')).toBe(false)
+    expect(await integ.hooks.hook('session-start').isInstalled()).toBe(false)
     const file = JSON.parse(await readFile(hooksPath(), 'utf8')) as {
       hooks: Record<string, Array<{ hooks: Array<{ command: string }> }>>
     }
@@ -171,20 +171,20 @@ describe('CodexIntegration', () => {
     const { CodexIntegration } = await import('../integrations/codex/index.js')
     const integ = new CodexIntegration()
     await integ.install()
-    await integ.hooks.enableHook('session-start')
+    await integ.hooks.hook('session-start').install()
     await integ.uninstall()
-    expect(await integ.hooks.isHookEnabled('session-start')).toBe(false)
+    expect(await integ.hooks.hook('session-start').isInstalled()).toBe(false)
   })
 
   it('readHooks refuses to overwrite a malformed hooks.json', async () => {
     const { CodexIntegration } = await import('../integrations/codex/index.js')
     await mkdir(join(home, '.codex'), { recursive: true })
     await writeFile(hooksPath(), '{ not valid json', 'utf8')
-    await expect(new CodexIntegration().hooks.enableHook('session-start')).rejects.toThrow(/not valid JSON/)
+    await expect(new CodexIntegration().hooks.hook('session-start').install()).rejects.toThrow(/not valid JSON/)
   })
 
-  it('enableHook rejects an unknown hook kind', async () => {
+  it('hook() rejects an unknown hook kind synchronously', async () => {
     const { CodexIntegration } = await import('../integrations/codex/index.js')
-    await expect(new CodexIntegration().hooks.enableHook('auto-retrieve')).rejects.toThrow(/Unknown hook kind/)
+    expect(() => new CodexIntegration().hooks.hook('auto-retrieve')).toThrow(/Unknown hook kind/)
   })
 })

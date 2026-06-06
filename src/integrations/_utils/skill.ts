@@ -21,6 +21,23 @@ will want.
 A **memento** is one logical memory. A **chronicle** is a past conversation — a set of
 mementos imported together by \`mementos ingest\` or the snapshot hook.
 
+## How to invoke mementos
+
+Mementos exposes the same operations through two channels — pick whichever your
+client supports:
+
+- **MCP mode (preferred when available)**: call \`recall\`, \`write_memento\`,
+  \`update_memento\`, \`get_tags\`, etc. as tools. The MCP server is registered
+  when you see those tool names in your tool list.
+- **CLI mode**: when there is no MCP server, run the same operations via shell:
+  \`mementos recall "..."\`, \`mementos write "..." --tags=a,b\`,
+  \`mementos update <id> "..." [--tags=a,b]\`, \`mementos tags\`, etc.
+  The \`## Tools (MCP)\` and \`## CLI equivalents\` sections below show the
+  one-to-one mapping.
+
+Both channels hit the same vault. Examples in this skill use the MCP names for
+brevity; the corresponding CLI form is at the bottom.
+
 ## Recalling memories
 
 At the start of each new conversation, call recall with a short description of what
@@ -152,20 +169,26 @@ edited it first. Call get_memento again, re-apply your change to the current tex
 - \`update_memory_index(text)\` — revise the curated index memento (id is internal)
 - \`sync()\` — pull the latest memories from storage now; call only when the user insists a memento exists but recall came up empty (it may have been written on another device)
 
-## CLI equivalents (when MCP is unavailable)
+## CLI equivalents
 
-If only the CLI is available (no MCP server connection), a subset of read/manage
-operations can be invoked via shell. The core write workflow (\`recall\`,
-\`write_memento\`, \`update_memento\`, index management) is MCP-only — without MCP
-the vault is read-only from the AI's side.
+Every MCP tool has a matching shell command, so when the MCP server isn't
+registered on this client you can still drive the vault via shell:
 
-- \`mementos list [tag1 tag2 ...]\` — list mementos, optionally filtered by tags (subset of \`list_mementos\`; no date range, no semantic ranking)
-- \`mementos get <id>\` — equivalent to \`get_memento\`
-- \`mementos delete <id>\` — equivalent to \`delete_memento\`
-- \`mementos search <query> [--regex] [--k=N] [--context=N] [--case-sensitive]\` — equivalent to \`search\`
-- \`mementos sync\` — equivalent to \`sync\`
+- \`mementos recall <query> [--k=N] [--tags=a,b] [--exclude-tags=a,b] [--chronicle=id]\` — same as \`recall\`
+- \`mementos write <text> [--tags=a,b]\` — same as \`write_memento\` (multi-line via piped stdin: \`echo "text" | mementos write\`)
+- \`mementos update <id> <text> [--tags=a,b]\` — same as \`update_memento\` (multi-line via piped stdin)
+- \`mementos tags\` — same as \`get_tags\`
+- \`mementos get <id>\` — same as \`get_memento\`
+- \`mementos chronicle <id>\` — same as \`get_chronicle\`
+- \`mementos chronicles\` — same as \`list_chronicles\`
+- \`mementos list [tag1 tag2 ...] [--tags=a,b] [--start=...] [--end=...] [--query=...] [--k=N]\` — same as \`list_mementos\` (positional tags = back-compat tag filter)
+- \`mementos index [<text>]\` — same as \`get_memory_index\` (no text) or \`update_memory_index\` (text via positional or piped stdin)
+- \`mementos delete <id>\` — same as \`delete_memento\`
+- \`mementos search <query> [--regex] [--k=N] [--context=N] [--case-sensitive]\` — same as \`search\`
+- \`mementos sync\` — same as \`sync\`
 
-For everything else, prompt the user to wire up an MCP-enabled client.
+The CLI and MCP paths share the same vault; an id printed by \`mementos write\`
+can be passed straight to the MCP \`update_memento\` tool (and vice versa).
 `
 
 /**

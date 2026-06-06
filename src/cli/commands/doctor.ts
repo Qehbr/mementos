@@ -307,7 +307,7 @@ async function checkIntegrations(): Promise<CheckResult[]> {
       if (integration.hooks) {
         const states: string[] = []
         for (const kind of integration.hooks.supportedHooks()) {
-          const enabled = await integration.hooks.isHookEnabled(kind).catch(() => null)
+          const enabled = await integration.hooks.hook(kind).isInstalled().catch(() => null)
           if (enabled !== null) states.push(`${kind}=${enabled ? 'on' : 'off'}`)
         }
         if (states.length > 0) hookStatus = `, hooks: ${states.join(' ')}`

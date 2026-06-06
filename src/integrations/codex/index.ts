@@ -9,15 +9,14 @@ import { join } from 'node:path'
 import { homedir } from 'node:os'
 import { cliRunner } from '../_utils/cli-runner.js'
 import { pathExists } from '../../core/_utils/fs.js'
-import type { ClientIntegration } from '../interface.js'
+import type { ClientIntegration, BinarySurface } from '../interface.js'
 import { MCP_SERVER_COMMAND, SESSION_START_COMMAND } from '../interface.js'
 import type { IntegrationImplementationModule } from '../registry.js'
 import type { InitContext } from '../../core/init-context/interface.js'
-import { promptHookToggle } from '../_utils/prompt.js'
+import { promptBinaryToggle, hookToggleMessages } from '../_utils/prompt.js'
 import { StepCounter } from '../../cli/_utils/prompts.js'
 import { SKILL_MD, writeSkillFile } from '../_utils/skill.js'
 import { HookRegistry, jsonHooksAdapter, type HookSpec } from '../_utils/hook-registry.js'
-import { withInstallShell } from '../_utils/install-shell.js'
 
 /** Run `codex <args>` as a subprocess — Codex's own CLI owns the MCP-config schema. */
 const codex = cliRunner('codex')
@@ -47,7 +46,7 @@ export class CodexIntegration implements ClientIntegration {
   /** Install bundle: MCP server registration + skill file. Idempotent. */
   async install(): Promise<void> {
     await this.installMcpServer()
-    await this.installSkill()
+    await this.skill.install()
   }
 
   /**
@@ -56,7 +55,7 @@ export class CodexIntegration implements ClientIntegration {
    * already-absent server / skill / hook.
    */
   async uninstall(): Promise<void> {
-    await codex(['mcp', 'remove', 'mementos']).catch(() => { /* not registered — fine */ })
+    await this.removeMcpServer()
     await rm(this.skillDir, { recursive: true, force: true })
     await this.hooks.disableAllHooks()
   }
@@ -80,34 +79,56 @@ export class CodexIntegration implements ClientIntegration {
    * hook (default = current state, so `--reinit` keeps things via Enter). Flag
    * `--codex-hook-auto-retrieve=on|off` skips the prompt.
    */
+  readonly skill: BinarySurface = {
+    isInstalled: () => pathExists(join(this.skillDir, 'SKILL.md')),
+    install: () => writeSkillFile(this.skillDir, 'SKILL.md', SKILL_MD),
+    uninstall: () => rm(this.skillDir, { recursive: true, force: true }),
+  }
+
+  readonly mcp: BinarySurface = {
+    isInstalled: () => this.isInstalled(),
+    install: () => this.installMcpServer(),
+    uninstall: () => this.removeMcpServer(),
+  }
+
   async setupAtInit(ctx: InitContext): Promise<void> {
-    await withInstallShell(
-      { name: this.name, install: () => this.install(), isInstalled: () => this.isInstalled() },
-      ctx,
-      async () => {
-        const steps = new StepCounter(1)
-        await promptHookToggle({
-          ctx, flag: `${type}-hook-session-start`, label: 'Session-start hook',
-          integration: type, kind: 'session-start',
-          current: await this.hooks.isHookEnabled('session-start'),
-          defaultYes: true,
-          steps,
-          promptText: 'Enable Codex session-start hook? (loads the curated memory index ONCE at conversation start so you do not have to recall it; cheap.)',
-          enable: () => this.hooks.enableHook('session-start'),
-          disable: () => this.hooks.disableHook('session-start'),
-        })
-      },
-    )
+    try {
+      await promptBinaryToggle({
+        ctx, surface: this.mcp, flag: `${type}-mcp`,
+        promptText: 'Register the Codex MCP server? (Yes; or No to use the mementos CLI from Codex\'s shell tool instead)',
+        installedMsg: 'MCP server: registered',
+        removedMsg: 'MCP server: removed (CLI + skill mode)',
+      })
+      await promptBinaryToggle({
+        ctx, surface: this.skill, flag: `${type}-skill`,
+        promptText: 'Install the Codex skill file? (teaches Codex when/how to use the memory tools)',
+        installedMsg: `Skill: installed at ${join(this.skillDir, 'SKILL.md')}`,
+        removedMsg: 'Skill: not installed',
+        defaultYes: true,
+      })
+      const steps = new StepCounter(1)
+      await promptBinaryToggle({
+        ctx, surface: this.hooks.hook('session-start'),
+        flag: `${type}-hook-session-start`,
+        promptText: 'Enable Codex session-start hook? (loads the curated memory index ONCE at conversation start so you do not have to recall it; cheap.)',
+        ...hookToggleMessages('Session-start hook', type, 'session-start'),
+        defaultYes: true,
+        steps,
+      })
+    } catch (e) {
+      ctx.print(`Skipped ${this.name}: ${(e as Error).message}`)
+    }
   }
 
   /** Idempotent: remove-then-add, since `codex mcp add` rejects duplicates. */
   private async installMcpServer(): Promise<void> {
-    await codex(['mcp', 'remove', 'mementos']).catch(() => { /* not present — fine */ })
+    await this.removeMcpServer()
     await codex(['mcp', 'add', 'mementos', '--', ...MCP_SERVER_COMMAND])
   }
 
-  private async installSkill(): Promise<void> {
-    await writeSkillFile(this.skillDir, 'SKILL.md', SKILL_MD)
+  /** Remove the MCP server registration. Tolerates not-registered. */
+  private async removeMcpServer(): Promise<void> {
+    await codex(['mcp', 'remove', 'mementos']).catch(() => { /* not present — fine */ })
   }
 
   // ─── Hook lifecycle ──────────────────────────────────────────────────────────
