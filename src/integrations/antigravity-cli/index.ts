@@ -12,21 +12,36 @@
  *     skills/mementos/SKILL.md             (the AI-facing skill, with YAML frontmatter)
  *   ~/.gemini/config/import_manifest.json  (entry so `agy plugin list` shows us)
  *
- * The `BeforeAgent` + `SessionStart` hook events are inherited from the Gemini CLI
- * contract Antigravity carries forward. Hook output is wrapped in the
- * `hookSpecificOutput.additionalContext` envelope by this integration's
- * `output-adapter.ts`, selected via the generic `--output-adapter=gemini-hook`
- * flag — the runtime never names "gemini" in core code.
+ * The `PreInvocation` event fires before each user message reaches the agent — it's
+ * Antigravity's canonical pre-prompt lifecycle hook. Verified by inspecting the
+ * agy 1.0.2 binary: only `PreInvocation`/`PostInvocation`/`PreToolUse`/`PostToolUse`/
+ * `Stop` are registered as agent-lifecycle hook events. (Antigravity CLI superseded
+ * Gemini CLI; the older `BeforeAgent`/`SessionStart` event names from Gemini CLI no
+ * longer exist.) The pre-1.0.2 integration shipped `BeforeAgent` which validated
+ * but never fired — a real bug.
+ *
+ * Antigravity has no session-lifecycle event, so the Claude-Code-style "load the
+ * memory index once at conversation start" UX is not available here; users get
+ * auto-retrieve (per-prompt) only.
+ *
+ * The hook command is plain `mementos retrieve` — same as Claude Code and Codex.
+ * Antigravity's PreInvocation handler may expect a JSON envelope
+ * (`{ hookSpecificOutput: { hookEventName, additionalContext } }`, the shape
+ * Gemini CLI documented). We can't verify against `agy --print` without OAuth,
+ * so until a real user reports that auto-injection works (or doesn't), we ship
+ * plain text and accept that the auto-retrieve hook may be a no-op for
+ * Antigravity. The MCP server's `recall` tool is the load-bearing path
+ * regardless — users get explicit retrieval there.
  */
 import { rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { homedir } from 'node:os'
 import { pathExists } from '../../core/_utils/fs.js'
 import type { ClientIntegration } from '../interface.js'
-import { mcpServerEntry, AUTO_RETRIEVE_COMMAND, SESSION_START_COMMAND } from '../interface.js'
+import { mcpServerEntry, AUTO_RETRIEVE_COMMAND } from '../interface.js'
 import type { IntegrationImplementationModule } from '../registry.js'
 import type { InitContext } from '../../core/init-context/interface.js'
-import { promptAutoRetrieveHook, promptHookToggle } from '../_utils/prompt.js'
+import { promptAutoRetrieveHook } from '../_utils/prompt.js'
 import { StepCounter } from '../../cli/_utils/prompts.js'
 import { SKILL_MD, writeSkillFile } from '../_utils/skill.js'
 import { HookRegistry, jsonHooksAdapter, type HookSpec, type HookConfigAdapter } from '../_utils/hook-registry.js'
@@ -122,19 +137,11 @@ export class AntigravityCliIntegration implements ClientIntegration {
       { name: this.name, install: () => this.install(), isInstalled: () => this.isInstalled() },
       ctx,
       async () => {
-        const steps = new StepCounter(2)
+        // Antigravity has only PreInvocation — no session-start equivalent.
+        // One prompt total.
+        const steps = new StepCounter(1)
         await promptAutoRetrieveHook(ctx, this, type,
           'Enable Antigravity CLI auto-retrieval hook? (pre-injects memories before every message; costs tokens on trivial turns)', steps)
-        await promptHookToggle({
-          ctx, flag: `${type}-hook-session-start`, label: 'Session-start hook',
-          integration: type, kind: 'session-start',
-          current: await this.hooks.isHookEnabled('session-start'),
-          defaultYes: true,
-          steps,
-          promptText: 'Enable Antigravity CLI session-start hook? (loads the curated memory index ONCE at conversation start so you do not have to recall it; cheap.)',
-          enable: () => this.hooks.enableHook('session-start'),
-          disable: () => this.hooks.disableHook('session-start'),
-        })
       },
     )
   }
@@ -183,25 +190,16 @@ export class AntigravityCliIntegration implements ClientIntegration {
   // ─── Hook lifecycle ──────────────────────────────────────────────────────────
 
   /**
-   * Both events inherited from the Gemini CLI hook system Antigravity carries forward:
-   *   - `BeforeAgent` fires per user message (the auto-retrieve path).
-   *   - `SessionStart` fires once at conversation start / `/clear` / resume — the
-   *     intended event for "load initial context" (the memory-index prelude).
-   * `--output-adapter=gemini-hook` selects this integration's adapter
-   * (`output-adapter.ts`) which wraps stdout in the
-   * `hookSpecificOutput.additionalContext` envelope Antigravity reads;
-   * `--hook-event=<event>` flows through as the adapter's event-name param.
+   * Antigravity supports only `PreInvocation` for per-prompt context injection.
+   * Hook command is the plain `mementos retrieve` — runtime emits plain text,
+   * same as for Claude Code / Codex. See the file-level docstring for the
+   * envelope-shape caveat.
    */
   private static readonly HOOKS = {
     'auto-retrieve': {
-      event: 'BeforeAgent',
-      command: `${AUTO_RETRIEVE_COMMAND} --output-adapter=gemini-hook --hook-event=BeforeAgent`,
+      event: 'PreInvocation',
+      command: AUTO_RETRIEVE_COMMAND,
       baseCommand: AUTO_RETRIEVE_COMMAND,
-    },
-    'session-start': {
-      event: 'SessionStart',
-      command: `${SESSION_START_COMMAND} --output-adapter=gemini-hook --hook-event=SessionStart`,
-      baseCommand: SESSION_START_COMMAND,
     },
   } as const satisfies Record<string, HookSpec>
 

@@ -50,18 +50,19 @@ try {
 
   if (!await pathExists(skillPath)) fail(`skill file not written at ${skillPath}`)
   const skill = await readFile(skillPath, 'utf8')
-  if (!skill.includes('retrieve_memories')) fail('SKILL.md is missing expected guidance')
   if (!skill.startsWith('---\nname: mementos\n')) fail('SKILL.md is missing the frontmatter')
+  if (!skill.includes('recall(')) fail('SKILL.md body missing expected `recall(...)` guidance')
   pass('SKILL.md written with frontmatter + shared body')
 
   await integration.install()
   pass('install() is idempotent (second run clean)')
 
-  console.log('\nhook lifecycle (auto-retrieve → ~/.codex/hooks.json)')
-  if (integration.hooks.supportedHooks().join() !== 'auto-retrieve') {
-    fail(`supportedHooks() should be exactly ['auto-retrieve'], got [${integration.hooks.supportedHooks().join()}]`)
+  console.log('\nhook lifecycle (auto-retrieve + session-start → ~/.codex/hooks.json)')
+  const expectedHooks = ['auto-retrieve', 'session-start']
+  if (integration.hooks.supportedHooks().join() !== expectedHooks.join()) {
+    fail(`supportedHooks() should be ${JSON.stringify(expectedHooks)}, got ${JSON.stringify(integration.hooks.supportedHooks())}`)
   }
-  pass("supportedHooks() reports ['auto-retrieve']")
+  pass(`supportedHooks() reports ${JSON.stringify(expectedHooks)}`)
 
   await integration.hooks.enableHook('auto-retrieve')
   if (!await integration.hooks.isHookEnabled('auto-retrieve')) fail('isHookEnabled() false right after enableHook()')

@@ -14,6 +14,14 @@ export interface HookSpec {
    * is centralised in `matchesCommand` — siblings can't drift on the regex shape.
    */
   baseCommand: string
+  /**
+   * Per-event matcher (Claude Code's `hooks[event][i].matcher`). Semantics depend on the
+   * event: for `SessionStart` it's the source (`startup|resume|clear|compact`), for
+   * `PreCompact` it's `auto|manual`, for tool events it's a tool-name pattern. Empty
+   * string or unset = match all sources. Adapters that don't have a matcher concept
+   * (Codex's `hooks.json`) ignore this field.
+   */
+  matcher?: string
 }
 
 /** A per-event group entry — the shape stored under `<config>.hooks[event][i]`. */

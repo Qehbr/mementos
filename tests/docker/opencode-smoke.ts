@@ -57,8 +57,8 @@ try {
 
   if (!await pathExists(skillPath)) fail(`skill file not written at ${skillPath}`)
   const skill = await readFile(skillPath, 'utf8')
-  if (!skill.includes('retrieve_memories')) fail('SKILL.md is missing expected guidance')
   if (!skill.startsWith('---\nname: mementos\n')) fail('SKILL.md is missing the frontmatter')
+  if (!skill.includes('recall(')) fail('SKILL.md body missing expected `recall(...)` guidance')
   pass('SKILL.md written with frontmatter + shared body')
 
   const list = await opencode(['mcp', 'list']).catch(e => fail(`'opencode mcp list' failed: ${String(e)}`))

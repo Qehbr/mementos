@@ -124,12 +124,15 @@ describe('AntigravityCliIntegration', () => {
   })
 
   // ─── Hooks ────────────────────────────────────────────────────────────────
-  it('supportedHooks reports auto-retrieve + session-start', async () => {
+  // Antigravity 1.0.2 supports only PreInvocation for context injection — verified
+  // by grepping the agy binary. `BeforeAgent` (Gemini CLI legacy) and `SessionStart`
+  // (Claude-Code-style) are not registered hook event names.
+  it('supportedHooks reports auto-retrieve only (no SessionStart equivalent in Antigravity)', async () => {
     const { AntigravityCliIntegration } = await import('../integrations/antigravity-cli/index.js')
-    expect(new AntigravityCliIntegration().hooks.supportedHooks()).toEqual(['auto-retrieve', 'session-start'])
+    expect(new AntigravityCliIntegration().hooks.supportedHooks()).toEqual(['auto-retrieve'])
   })
 
-  it('enableHook(auto-retrieve) writes a BeforeAgent command hook into plugin.json', async () => {
+  it('enableHook(auto-retrieve) writes a PreInvocation command hook into plugin.json', async () => {
     const { AntigravityCliIntegration } = await import('../integrations/antigravity-cli/index.js')
     const integ = new AntigravityCliIntegration()
     await integ.install()  // base plugin.json must exist first
@@ -143,33 +146,23 @@ describe('AntigravityCliIntegration', () => {
       hooks: Record<string, Array<{ matcher: string; hooks: Array<{ type: string; command: string }> }>>
     }
     // Hook lives INSIDE plugin.json, not in a separate settings file.
-    expect(manifest.hooks['BeforeAgent']).toEqual([
+    expect(manifest.hooks['PreInvocation']).toEqual([
       {
         matcher: '*',
-        hooks: [{ name: 'mementos-retrieve', type: 'command', command: 'mementos retrieve --output-adapter=gemini-hook --hook-event=BeforeAgent' }],
+        hooks: [{ name: 'mementos-retrieve', type: 'command', command: 'mementos retrieve' }],
       },
     ])
+    // The retired `BeforeAgent` event name must never reappear.
+    expect(manifest.hooks['BeforeAgent']).toBeUndefined()
     expect(manifest.name).toBe('mementos')  // plugin metadata preserved
   })
 
-  it('enableHook(session-start) writes a SessionStart command hook into plugin.json', async () => {
+  it('enableHook(session-start) throws — Antigravity has no SessionStart event', async () => {
     const { AntigravityCliIntegration } = await import('../integrations/antigravity-cli/index.js')
     const integ = new AntigravityCliIntegration()
     await integ.install()
 
-    await integ.hooks.enableHook('session-start')
-    const manifest = JSON.parse(await readFile(pluginManifestPath(), 'utf8')) as {
-      hooks: Record<string, Array<{ matcher: string; hooks: Array<{ type: string; command: string; name?: string }> }>>
-    }
-    expect(manifest.hooks['SessionStart']).toEqual([
-      {
-        matcher: '*',
-        hooks: [{ name: 'mementos-session-start', type: 'command', command: 'mementos session-start --output-adapter=gemini-hook --hook-event=SessionStart' }],
-      },
-    ])
-    expect(await integ.hooks.isHookEnabled('session-start')).toBe(true)
-    // auto-retrieve event untouched
-    expect(manifest.hooks['BeforeAgent']).toBeUndefined()
+    await expect(integ.hooks.enableHook('session-start')).rejects.toThrow(/Unknown hook kind 'session-start'/)
   })
 
   it('enableHook on a fresh setup creates a valid plugin.json (name/version present)', async () => {
@@ -191,10 +184,10 @@ describe('AntigravityCliIntegration', () => {
     await integ.hooks.enableHook('auto-retrieve')
 
     const manifest = JSON.parse(await readFile(pluginManifestPath(), 'utf8')) as { hooks: Record<string, unknown[]> }
-    expect(manifest.hooks['BeforeAgent']).toHaveLength(1)
+    expect(manifest.hooks['PreInvocation']).toHaveLength(1)
   })
 
-  it('disableHook removes our entry but preserves other groups under BeforeAgent', async () => {
+  it('disableHook removes our entry but preserves other groups under PreInvocation', async () => {
     const { AntigravityCliIntegration } = await import('../integrations/antigravity-cli/index.js')
     const integ = new AntigravityCliIntegration()
     await integ.install()
@@ -202,7 +195,7 @@ describe('AntigravityCliIntegration', () => {
     // User has a pre-existing hook of their own under the same event.
     const manifestRaw = JSON.parse(await readFile(pluginManifestPath(), 'utf8')) as Record<string, unknown>
     manifestRaw['hooks'] = {
-      BeforeAgent: [{ matcher: '*', hooks: [{ type: 'command', command: 'my-own-hook' }] }],
+      PreInvocation: [{ matcher: '*', hooks: [{ type: 'command', command: 'my-own-hook' }] }],
     }
     await writeFile(pluginManifestPath(), JSON.stringify(manifestRaw), 'utf8')
 
@@ -213,7 +206,7 @@ describe('AntigravityCliIntegration', () => {
     const manifest = JSON.parse(await readFile(pluginManifestPath(), 'utf8')) as {
       hooks: Record<string, Array<{ hooks: Array<{ command: string }> }>>
     }
-    expect(manifest.hooks['BeforeAgent']).toEqual([
+    expect(manifest.hooks['PreInvocation']).toEqual([
       { matcher: '*', hooks: [{ type: 'command', command: 'my-own-hook' }] },
     ])
   })

@@ -4,7 +4,7 @@
  *
  * Exercises AntigravityCliIntegration against the REAL `agy` CLI: writes the plugin
  * bundle (plugin.json + skills/), adds the import-manifest entry, verifies discovery via
- * `agy plugin list`, toggles the BeforeAgent hook, and confirms `agy plugin uninstall`
+ * `agy plugin list`, toggles the PreInvocation hook, and confirms `agy plugin uninstall`
  * cleanup. The unit tests run pure filesystem I/O; this proves the genuine CLI
  * discovers what we write and still starts with our config present.
  *
@@ -80,11 +80,15 @@ try {
   pass('install() is idempotent (second run clean)')
 
   // ─── Hook lifecycle ────────────────────────────────────────────────────────
-  console.log('\nhook lifecycle (auto-retrieve → plugin.json BeforeAgent)')
-  if (integration.hooks.supportedHooks().join() !== 'auto-retrieve') {
-    fail(`supportedHooks() should be exactly ['auto-retrieve'], got [${integration.hooks.supportedHooks().join()}]`)
+  // Antigravity supports only `PreInvocation` (verified by grepping the agy 1.0.2
+  // binary: `BeforeAgent`/`SessionStart` are not registered hook event names).
+  // The pre-1.0.2 integration shipped `BeforeAgent` which validated but never fired.
+  console.log('\nhook lifecycle (auto-retrieve → PreInvocation in plugin.json)')
+  const expectedHooks = ['auto-retrieve']
+  if (integration.hooks.supportedHooks().join() !== expectedHooks.join()) {
+    fail(`supportedHooks() should be ${JSON.stringify(expectedHooks)}, got ${JSON.stringify(integration.hooks.supportedHooks())}`)
   }
-  pass("supportedHooks() reports ['auto-retrieve']")
+  pass(`supportedHooks() reports ${JSON.stringify(expectedHooks)}`)
 
   await integration.hooks.enableHook('auto-retrieve')
   if (!await integration.hooks.isHookEnabled('auto-retrieve')) fail('isHookEnabled() false right after enableHook()')
@@ -93,12 +97,16 @@ try {
   const afterEnable = JSON.parse(await readFile(pluginManifestPath, 'utf8')) as {
     name?: string; hooks?: Record<string, Array<{ hooks?: Array<{ type?: string; command?: string }> }>>
   }
-  const handler = afterEnable.hooks?.['BeforeAgent']?.[0]?.hooks?.[0]
-  if (handler?.type !== 'command' || handler?.command !== 'mementos retrieve --format=gemini') {
-    fail(`plugin.json BeforeAgent entry is wrong:\n${JSON.stringify(afterEnable, null, 2)}`)
+  const handler = afterEnable.hooks?.['PreInvocation']?.[0]?.hooks?.[0]
+  const expectedCmd = 'mementos retrieve'
+  if (handler?.type !== 'command' || handler?.command !== expectedCmd) {
+    fail(`plugin.json PreInvocation entry is wrong:\n${JSON.stringify(afterEnable, null, 2)}`)
+  }
+  if (afterEnable.hooks?.['BeforeAgent']) {
+    fail(`plugin.json still has a BeforeAgent entry — that event was retired:\n${JSON.stringify(afterEnable, null, 2)}`)
   }
   if (afterEnable.name !== 'mementos') fail('enableHook() clobbered the plugin name field')
-  pass('plugin.json has a BeforeAgent "mementos retrieve --format=gemini" hook (and name preserved)')
+  pass(`plugin.json has a PreInvocation "${expectedCmd}" hook (and name preserved)`)
 
   await agy(['plugin', 'list']).catch(e => fail(`agy CLI failed with our plugin + hook present: ${String(e)}`))
   pass('agy plugin list still runs with the hook present')
@@ -112,8 +120,8 @@ try {
   const afterDouble = JSON.parse(await readFile(pluginManifestPath, 'utf8')) as {
     hooks?: Record<string, unknown[]>
   }
-  if (afterDouble.hooks?.['BeforeAgent']?.length !== 1) {
-    fail(`enableHook() not idempotent — got ${JSON.stringify(afterDouble.hooks?.['BeforeAgent'])}`)
+  if (afterDouble.hooks?.['PreInvocation']?.length !== 1) {
+    fail(`enableHook() not idempotent — got ${JSON.stringify(afterDouble.hooks?.['PreInvocation'])}`)
   }
   pass('enableHook() is idempotent (second call leaves one entry)')
 

@@ -60,11 +60,14 @@ export function createMcpServer(
   server.registerTool(
     'write_memento',
     {
-      description: 'Store a new memento (memory) in the vault. Use for facts worth keeping across sessions: user preferences, architectural decisions, project conventions, mistakes to avoid. One clear fact per memento. Avoid writing transient or conversation-specific things. If a similar memento already exists the tool will warn you — use update_memento instead. Call get_tags first and prefer existing tags over inventing new ones.',
+      description: 'Store a new memento (memory) in the vault. Use for durable facts: user preferences, architectural decisions, project conventions, mistakes to avoid. One clear fact per memento; avoid transient or conversation-specific notes. Call get_tags first and prefer existing tags over inventing new ones.',
       inputSchema: {
         text: z.string().describe('The memento text. Be specific and self-contained.'),
         tags: z.array(z.string()).optional().describe('Topic tags for filtering, e.g. ["coding", "architecture"]'),
       },
+      // Not idempotent: calling twice with the same text raises a "similar memento exists"
+      // warning and refuses to write the duplicate. Mutates vault state.
+      annotations: { idempotentHint: false },
     },
     async ({ text, tags }) => {
       try {
@@ -92,6 +95,7 @@ export function createMcpServer(
         exclude_tags: z.array(z.string()).optional().describe('Drop any memento that has at least one of these tags (applied after the include filter)'),
         chronicle_id: z.string().optional().describe('Restrict the search to mementos in this conversation (chronicle)'),
       },
+      annotations: { readOnlyHint: true },
     },
     async ({ query, k, tags, exclude_tags, chronicle_id }) => ({
       content: [{
@@ -104,8 +108,9 @@ export function createMcpServer(
   server.registerTool(
     'get_tags',
     {
-      description: 'Return all tags currently used in the vault with their usage count. Call this before writing a memento with tags — prefer existing tags over inventing new ones to keep the tag namespace consistent.',
+      description: 'Return all tags currently used in the vault with their usage count. Call before write_memento to see what tags exist and reuse them.',
       inputSchema: {},
+      annotations: { readOnlyHint: true },
     },
     async () => ({
       content: [{ type: 'text', text: renderTags(await vault.getTags()) }],
@@ -115,8 +120,14 @@ export function createMcpServer(
   server.registerTool(
     'sync',
     {
-      description: 'Pull the latest memories from storage right now. The vault auto-syncs across devices every few minutes, so you rarely need this — call it only when the user says a memory should exist but recall or get_memento came up empty (it may have just been written on another device that has not propagated yet). After it reports new memories, retry your search.',
+      description: 'Pull the latest memories from storage right now. Call when the user says a memory should exist but recall or get_memento came up empty — it may have been written on another device since the last auto-sync.',
       inputSchema: {},
+      // Reads from a remote (other devices' .mem files). Doesn't mutate the
+      // vault's logical contents itself, but its result depends on external
+      // state and varies between calls — that's exactly what openWorldHint
+      // signals. Idempotent in the sense that two syncs back-to-back leave
+      // the same state (whatever was upstream is now local).
+      annotations: { readOnlyHint: true, openWorldHint: true, idempotentHint: true },
     },
     async () => {
       const counts = formatSyncCounts(await vault.sync())
@@ -130,11 +141,14 @@ export function createMcpServer(
   server.registerTool(
     'update_memento',
     {
-      description: 'Replace the text of an existing memento. The whole memento is re-chunked and re-embedded. If the memento changed on disk since you last read it (another device synced, a concurrent agent), the update is rejected and you are told to re-read it with get_memento and re-apply your edit.',
+      description: 'Replace the text of an existing memento by id. Tags and id are preserved; only the text changes.',
       inputSchema: {
         memento_id: z.string().describe('Memento id to update (from the id= field in recall or list output)'),
         text: z.string().describe('The new full text for the memento'),
       },
+      // Idempotent: same (id, text) applied twice is a no-op on the second call
+      // (etag matches, content matches). Mutates state, so not readOnly.
+      annotations: { idempotentHint: true },
     },
     async ({ memento_id, text }) => {
       try {
@@ -153,7 +167,7 @@ export function createMcpServer(
   server.registerTool(
     'get_memory_index',
     {
-      description: 'Read the curated memory-index memento — your top-level summary of this vault, maintained by you across sessions. The auto-loaded session-start prelude includes its body; call this only when you need to re-read it later in the conversation (e.g. before deciding what to update). Returns the body text — pass new text to update_memory_index to revise it; the index id is resolved internally.',
+      description: 'Read the curated memory-index memento — the vault\'s top-level summary, hand-curated across sessions. Pass new text to update_memory_index to revise it; the index id is resolved internally.',
       inputSchema: {},
       annotations: { readOnlyHint: true },
     },
@@ -173,6 +187,8 @@ export function createMcpServer(
       inputSchema: {
         text: z.string().describe('The full new body for the memory index. Replaces the previous text in its entirety — include everything you want to keep.'),
       },
+      // Same posture as update_memento — idempotent for a given body text.
+      annotations: { idempotentHint: true },
     },
     async ({ text }) => ({
       content: [{ type: 'text', text: renderUpdate(await vault.updateIndex(text)) }],
@@ -186,6 +202,7 @@ export function createMcpServer(
       inputSchema: {
         memento_id: z.string().describe('The memento id shown in a recall result'),
       },
+      annotations: { readOnlyHint: true },
     },
     async ({ memento_id }) => ({
       content: [{ type: 'text', text: renderMemento(await vault.getMemento(memento_id), memento_id) }],
@@ -195,10 +212,11 @@ export function createMcpServer(
   server.registerTool(
     'get_chronicle',
     {
-      description: 'Return every memento of one conversation (chronicle) in order. Chronicles are created by bulk import (mementos ingest) and the pre-compaction snapshot hook. Pass the chronicle id shown in a recall result; forks (edited / re-rolled turns) are annotated inline. Each memento is shown as a short preview — long turns are truncated; call get_memento(<id>) for the full text of any turn.',
+      description: 'Return every memento of one conversation (chronicle) in order, with forks (edited / re-rolled turns) annotated inline. Get a chronicle_id from list_chronicles or a recall result. Long turns are shown as previews — call get_memento for the full text of any specific turn.',
       inputSchema: {
         chronicle_id: z.string().describe('The chronicle id shown in a recall result'),
       },
+      annotations: { readOnlyHint: true },
     },
     async ({ chronicle_id }) => ({
       content: [{ type: 'text', text: renderChronicle(await vault.getChronicle(chronicle_id), chronicle_id) }],
@@ -208,8 +226,9 @@ export function createMcpServer(
   server.registerTool(
     'list_chronicles',
     {
-      description: 'List every conversation (chronicle) in the vault with its memento count and start time. Use to discover which past conversations are available before drilling into one with get_chronicle.',
+      description: 'List every conversation (chronicle) in the vault with its memento count and start time. Use to find the right chronicle_id before calling get_chronicle.',
       inputSchema: {},
+      annotations: { readOnlyHint: true },
     },
     async () => ({
       content: [{ type: 'text', text: renderChronicleList(await vault.listChronicles()) }],
@@ -219,12 +238,14 @@ export function createMcpServer(
   server.registerTool(
     'delete_memento',
     {
-      description: 'Delete a memento from the vault by id. Removes exactly one memento (its single file).',
+      description: 'Delete a memento from the vault by id. Prefer update_memento to revise an existing memento — update keeps the same id (so references stay valid), preserves tags, and detects concurrent edits.',
       inputSchema: {
         memento_id: z.string().describe('Memento id to delete'),
       },
       // MCP clients use these hints to flag the call to the user (e.g. an "are you sure?"
-      // confirmation) and to skip safety wrappers on read-only ops.
+      // confirmation) and to skip safety wrappers on read-only ops. delete is idempotent
+      // in spec terms — deleting the same id twice ends at the same state — but the second
+      // call surfaces an error, so we mark it non-idempotent to keep the client honest.
       annotations: { destructiveHint: true, idempotentHint: false },
     },
     async ({ memento_id }) => {
@@ -236,13 +257,14 @@ export function createMcpServer(
   server.registerTool(
     'list_mementos',
     {
-      description: 'List mementos in reverse-chronological order by last-update time, optionally bounded by a date window and/or ranked by a query. With no params: the k most-recently-touched mementos overall (use at session start to recap what was last on your mind). With `start`/`end`: useful for "what did we work on last week?" or "summarise everything from March." With `query`: results are ranked by semantic relevance instead of recency. Dates are ISO 8601 (e.g. "2026-05-01" or "2026-05-13T18:00:00Z"); a date-only `end` covers the whole day. Prefer recall when you have a specific topic in mind and no date bound — pure recency rarely beats semantic ranking.',
+      description: 'List mementos in reverse-chronological order by last-update time, optionally bounded by a date window and/or ranked by a query. Use `start`/`end` for "what did we work on last week?" or "summarise everything from March." With `query`, results are ranked by semantic relevance instead of recency.',
       inputSchema: {
         start: z.string().optional().describe('Lower bound, inclusive. ISO 8601 date or datetime. Omit to allow any.'),
         end: z.string().optional().describe('Upper bound, inclusive. ISO 8601 date or datetime. Omit to allow any.'),
         query: z.string().optional().describe('Optional natural-language query — when present, results are ranked by relevance to it instead of recency.'),
         k: z.number().int().positive().max(MAX_RECENT_LIMIT).default(DEFAULT_RECENT_LIMIT).describe(`Max results to return (default ${DEFAULT_RECENT_LIMIT}, max ${MAX_RECENT_LIMIT})`),
       },
+      annotations: { readOnlyHint: true },
     },
     async ({ start, end, query, k }) => ({
       content: [{
@@ -271,6 +293,7 @@ export function createMcpServer(
           exclude_tags: z.array(z.string()).optional().describe('Drop any memento that has at least one of these tags'),
           chronicle_id: z.string().optional().describe('Restrict the search to mementos in this conversation (chronicle)'),
         },
+        annotations: { readOnlyHint: true },
       },
       async ({ query, k, regex, ignore_case, context_chars, tags, exclude_tags, chronicle_id }) => ({
         content: [{

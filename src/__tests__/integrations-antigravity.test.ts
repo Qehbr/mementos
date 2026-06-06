@@ -2,7 +2,7 @@
  * Unit tests for AntigravityIntegration.
  *
  * Pure filesystem I/O (Antigravity is a GUI editor with no CLI), so these run against a
- * throwaway `HOME` — `~/.gemini/antigravity/mcp_config.json` lands in a tmp dir.
+ * throwaway `HOME` — `~/.gemini/config/mcp_config.json` lands in a tmp dir.
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { mkdtemp, rm, readFile, writeFile, mkdir } from 'node:fs/promises'
@@ -24,7 +24,7 @@ describe('AntigravityIntegration', () => {
     await rm(home, { recursive: true, force: true })
   })
 
-  const configPath = () => join(home, '.gemini', 'antigravity', 'mcp_config.json')
+  const configPath = () => join(home, '.gemini', 'config', 'mcp_config.json')
 
   it('install registers the mementos MCP server in mcp_config.json', async () => {
     const { create } = await import('../integrations/antigravity/index.js')
@@ -64,17 +64,17 @@ describe('AntigravityIntegration', () => {
     expect(await integ.isInstalled()).toBe(true)
   })
 
-  it('isClientPresent tracks the ~/.gemini/antigravity directory', async () => {
+  it('isClientPresent tracks the ~/.gemini/config directory (shared with Antigravity CLI + IDE)', async () => {
     const { create } = await import('../integrations/antigravity/index.js')
     const integ = create()
     expect(await integ.isClientPresent()).toBe(false)
-    await mkdir(join(home, '.gemini', 'antigravity'), { recursive: true })
+    await mkdir(join(home, '.gemini', 'config'), { recursive: true })
     expect(await integ.isClientPresent()).toBe(true)
   })
 
   it('install preserves the user\'s other MCP servers, uninstall leaves them', async () => {
     const { create } = await import('../integrations/antigravity/index.js')
-    await mkdir(join(home, '.gemini', 'antigravity'), { recursive: true })
+    await mkdir(join(home, '.gemini', 'config'), { recursive: true })
     await writeFile(configPath(), JSON.stringify({
       mcpServers: { other: { command: 'other-cmd' } },
     }), 'utf8')
@@ -93,7 +93,7 @@ describe('AntigravityIntegration', () => {
 
   it('refuses to overwrite a malformed mcp_config.json', async () => {
     const { create } = await import('../integrations/antigravity/index.js')
-    await mkdir(join(home, '.gemini', 'antigravity'), { recursive: true })
+    await mkdir(join(home, '.gemini', 'config'), { recursive: true })
     await writeFile(configPath(), '{ not valid json', 'utf8')
     await expect(create().install()).rejects.toThrow(/not valid JSON/)
   })

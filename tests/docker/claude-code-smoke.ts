@@ -10,7 +10,7 @@
  */
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
-import { stat, readFile } from 'node:fs/promises'
+import { stat, readFile, writeFile, mkdir } from 'node:fs/promises'
 import { join } from 'node:path'
 import { homedir } from 'node:os'
 import process from 'node:process'
@@ -18,7 +18,12 @@ import { ClaudeCodeIntegration } from '../../src/integrations/claude-code/index.
 
 const execFileP = promisify(execFile)
 const integration = new ClaudeCodeIntegration()
-const skillPath = join(homedir(), '.claude', 'skills', 'mementos.md')
+// Spec-compliant per-folder layout: ~/.claude/skills/<name>/SKILL.md with YAML frontmatter.
+// See https://code.claude.com/docs/en/skills. The pre-1.0.2 flat path
+// (~/.claude/skills/mementos.md) is no longer recognised by Claude Code.
+const skillDir = join(homedir(), '.claude', 'skills', 'mementos')
+const skillPath = join(skillDir, 'SKILL.md')
+const legacySkillPath = join(homedir(), '.claude', 'skills', 'mementos.md')
 const settingsPath = join(homedir(), '.claude', 'settings.json')
 
 function pass(msg: string): void { console.log(`  ✓ ${msg}`) }
@@ -51,8 +56,9 @@ try {
 
   if (!await pathExists(skillPath)) fail(`skill file not written at ${skillPath}`)
   const skill = await readFile(skillPath, 'utf8')
-  if (!skill.includes('retrieve_memories')) fail('skill file is missing expected guidance')
-  pass('skill file written')
+  if (!skill.startsWith('---\nname: mementos\n')) fail('SKILL.md missing the required Agent-Skills YAML frontmatter')
+  if (!skill.includes('recall(')) fail('SKILL.md body missing expected `recall(...)` guidance')
+  pass('SKILL.md written with frontmatter at the spec-compliant per-folder path')
 
   // ── hooks (auto-retrieve, pre-compact) — settings.json edits ─────────────
   console.log('\nhooks')
@@ -69,12 +75,24 @@ try {
     pass(`disableHook('${kind}') cleared`)
   }
 
+  // ── legacy-path migration: install must sweep the old flat file ─────────
+  // Simulate an existing pre-1.0.2 vault that has the flat mementos.md lying
+  // around; re-install should clear it so Claude Code doesn't see two skills.
+  console.log('\nlegacy-path migration')
+  await mkdir(join(homedir(), '.claude', 'skills'), { recursive: true })
+  await writeFile(legacySkillPath, '# stale flat-file skill from <1.0.2', 'utf8')
+  await integration.install()
+  if (await pathExists(legacySkillPath)) fail('install() did not sweep the legacy ~/.claude/skills/mementos.md flat file')
+  if (!await pathExists(skillPath)) fail('install() did not write the new per-folder SKILL.md')
+  pass('install() swept the legacy flat file and wrote the per-folder SKILL.md')
+
   // ── uninstall ────────────────────────────────────────────────────────────
   console.log('\nuninstall()')
   await integration.uninstall()
   if (await integration.isInstalled()) fail('isInstalled() still true after uninstall()')
   if (await pathExists(skillPath)) fail('skill file still present after uninstall()')
-  pass('uninstall() removed the MCP server + skill')
+  if (await pathExists(legacySkillPath)) fail('legacy flat file still present after uninstall()')
+  pass('uninstall() removed the MCP server + skill (both new and legacy paths)')
 
   // ── idempotency ──────────────────────────────────────────────────────────
   await integration.install()

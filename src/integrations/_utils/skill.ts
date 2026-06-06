@@ -13,8 +13,10 @@ export async function writeSkillFile(dir: string, filename: string, body: string
 
 export const SKILL_BODY = `# Mementos — Memory Vault
 
-You have access to an encrypted personal memory vault via MCP tools. It persists across
-sessions, tools, and devices.
+Mementos is an encrypted personal memory vault that persists across sessions, tools,
+and devices. Use it to recall what the user has said or decided before, and to write
+down durable facts (preferences, decisions, conventions, pitfalls) that future you
+will want.
 
 A **memento** is one logical memory. A **chronicle** is a past conversation — a set of
 mementos imported together by \`mementos ingest\` or the snapshot hook.
@@ -35,15 +37,15 @@ context might inform (tech choices, naming conventions, known pitfalls, user pre
 
 Two ways to find memories, for two different needs:
 
-- **recall** — semantic search. "What do I know about X?" Finds memories by *meaning*,
-  even when the wording differs. This is your default.
+- **recall** — semantic search. "What is known about X?" Finds memories by *meaning*,
+  even when the wording differs. This is the default.
 - **search** — exact-text search (present only when deep search is enabled). "Where does
   this *literal* string appear?" Use it for a specific error message, a code identifier,
   a file path, a UUID, an exact phrase — things semantic search misses. It returns short
   match snippets with surrounding context, not whole mementos; call get_memento for the
   full text of a hit that looks relevant.
 
-If you know the exact string, use search; if you're describing a topic, use recall.
+If the exact string is known, use search; if the goal is to describe a topic, use recall.
 
 ## When to write a memento
 
@@ -80,11 +82,11 @@ A memento may carry multiple tags. Combine them: \`["user", "preference"]\`, \`[
 
 ## The memory index
 
-The vault keeps ONE curated summary memento — your top-level view of what's in
+The vault keeps ONE curated summary memento — the top-level view of what's in
 this vault. The session-start hook loads it once per conversation under a
-\`[MEMORY-INDEX]\` heading; you can re-read it any time with \`get_memory_index\`
-and revise it with \`update_memory_index(text)\`. The id is resolved internally —
-you never have to track it.
+\`[MEMORY-INDEX]\` heading; re-read it any time with \`get_memory_index\` and
+revise it with \`update_memory_index(text)\`. The id is resolved internally —
+it never has to be tracked.
 
 Format the body as a flat list — one durable fact per line, optionally with the
 memento id when an entry points at a specific memento:
@@ -106,9 +108,9 @@ When NOT to update:
 
 ## Tags that mark a memento's origin
 
-Mementos carry an auto-applied \`source:*\` tag when they came from somewhere other than your own \`write_memento\` calls during a live chat — the tag names the tool whose transcript was ingested or auto-snapshotted (for example \`source:claude-code\`, \`source:openclaw\`).
+Mementos carry an auto-applied \`source:*\` tag when they came from somewhere other than a direct \`write_memento\` call during a live chat — the tag names the tool whose transcript was ingested or auto-snapshotted (for example \`source:claude-code\`, \`source:openclaw\`).
 
-Mementos you write directly with \`write_memento\` have NO \`source:*\` tag. To surface only your direct writes (the user's curated knowledge, not bulk-imported chat history), exclude the ingested sources:
+Mementos written directly with \`write_memento\` have NO \`source:*\` tag. To surface only direct writes (the user's curated knowledge, not bulk-imported chat history), exclude the ingested sources:
 
   recall("...", exclude_tags=["source:claude-code", "source:openclaw"])
 
@@ -134,7 +136,7 @@ full text.
 If update_memento reports the memento changed since you read it, another device or agent
 edited it first. Call get_memento again, re-apply your change to the current text, and retry.
 
-## Tools
+## Tools (MCP)
 
 - \`get_tags()\` — list all tags in use with counts — call before tagging a new memento
 - \`write_memento(text, tags?)\` — store a new memento
@@ -149,17 +151,34 @@ edited it first. Call get_memento again, re-apply your change to the current tex
 - \`get_memory_index()\` — re-read the curated index memento
 - \`update_memory_index(text)\` — revise the curated index memento (id is internal)
 - \`sync()\` — pull the latest memories from storage now; call only when the user insists a memento exists but recall came up empty (it may have been written on another device)
+
+## CLI equivalents (when MCP is unavailable)
+
+If only the CLI is available (no MCP server connection), a subset of read/manage
+operations can be invoked via shell. The core write workflow (\`recall\`,
+\`write_memento\`, \`update_memento\`, index management) is MCP-only — without MCP
+the vault is read-only from the AI's side.
+
+- \`mementos list [tag1 tag2 ...]\` — list mementos, optionally filtered by tags (subset of \`list_mementos\`; no date range, no semantic ranking)
+- \`mementos get <id>\` — equivalent to \`get_memento\`
+- \`mementos delete <id>\` — equivalent to \`delete_memento\`
+- \`mementos search <query> [--regex] [--k=N] [--context=N] [--case-sensitive]\` — equivalent to \`search\`
+- \`mementos sync\` — equivalent to \`sync\`
+
+For everything else, prompt the user to wire up an MCP-enabled client.
 `
 
 /**
- * `SKILL.md` form — `SKILL_BODY` with the YAML frontmatter that the OpenClaw and Codex
- * skill loaders require (`name` must be hyphen-case and match the folder; `description` is
- * a single line). Claude Code reads `SKILL_BODY` directly — its skill file takes no
- * frontmatter — so it imports `SKILL_BODY`, not this.
+ * `SKILL.md` form — `SKILL_BODY` with the YAML frontmatter every Agent-Skills-compliant
+ * client requires (`name` must be hyphen-case and match the folder; `description` is a
+ * single line that tells Claude what the skill does AND when to use it).
+ *
+ * Claude Code, Codex, OpenClaw, Antigravity all follow the same `<dir>/<name>/SKILL.md`
+ * layout in 2026 — see https://code.claude.com/docs/en/skills.
  */
 export const SKILL_MD = `---
 name: mementos
-description: Encrypted personal memory vault — recall past context and store durable facts via MCP tools.
+description: Encrypted personal memory vault — recall past context and store durable facts across conversations and devices. Use at the start of a conversation to surface relevant context, whenever the user mentions a preference, decision, project convention, or mistake worth remembering, and whenever an answer would benefit from past architectural decisions, naming conventions, or known pitfalls.
 ---
 
 ${SKILL_BODY}`

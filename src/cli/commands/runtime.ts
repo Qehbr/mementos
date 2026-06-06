@@ -13,7 +13,6 @@ import { buildVault, withVault } from '../_utils/vault.js'
 import { parseFlag } from '../_utils/flags.js'
 import { registerServe } from '../_utils/serve-registry.js'
 import { logRetrieveFailure } from '../_utils/retrieve-log.js'
-import { loadOutputAdapters } from '../../output-adapters/registry.js'
 import { readMachineConfig } from '../../core/config.js'
 import { DEFAULT_RECALL_K, DEFAULT_SEARCH_CONTEXT_CHARS } from '../../core/vault/constants.js'
 
@@ -81,7 +80,7 @@ export async function runSessionStart(): Promise<void> {
     await vault.startup()
     await vault.seedIndexIfMissing()
     const text = await vault.getIndexText()
-    if (text) process.stdout.write(await formatRetrieval(`[MEMORY-INDEX]\n${text}`))
+    if (text) process.stdout.write(`[MEMORY-INDEX]\n${text}\n`)
   } catch (e) {
     if (process.env['MEMENTOS_DEBUG']) await logRetrieveFailure(e)
   } finally {
@@ -103,7 +102,7 @@ export async function runRetrieve(): Promise<void> {
     vault = await buildVault()
     await vault.startup()
     const results = await vault.recall(query, DEFAULT_RECALL_K)
-    if (results.length > 0) process.stdout.write(await formatRetrieval(renderRecall(results)))
+    if (results.length > 0) process.stdout.write(renderRecall(results) + '\n')
   } catch (e) {
     if (process.env['MEMENTOS_DEBUG']) await logRetrieveFailure(e)
   } finally {
@@ -213,23 +212,6 @@ export async function runSearch(subcommand: string | undefined, args: string[]):
 }
 
 // ─── retrieve helpers (private — only used by runRetrieve) ───────────────────
-
-/**
- * Wrap hook output in whatever envelope the firing client expects. Adapter is
- * selected via `--output-adapter=<name>` and resolved through the auto-discovered
- * `src/output-adapters/` registry — client-specific envelope details live in each
- * adapter module, NOT here. `--hook-event=<event>` and any other `--hook-*` flag
- * flows through as `params` for adapters that need them. No adapter selected (or
- * an unknown one) = plain text + newline, the default Claude Code / Codex use.
- */
-async function formatRetrieval(memories: string): Promise<string> {
-  const adapterName = parseFlag('output-adapter')
-  if (!adapterName) return memories + '\n'
-  const registry = await loadOutputAdapters()
-  const impl = registry.get(adapterName)
-  if (!impl) return memories + '\n'  // unknown adapter → fail-soft to plain text
-  return impl.create().wrap(memories, { event: parseFlag('hook-event') ?? '' })
-}
 
 function extractQuery(raw: string): string {
   try {
