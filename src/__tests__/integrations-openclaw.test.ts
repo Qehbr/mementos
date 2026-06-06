@@ -48,7 +48,7 @@ describe('OpenClawIntegration', () => {
     const set = mockExecCalls.find(c => c.args[0] === 'mcp' && c.args[1] === 'set')
     expect(set).toBeDefined()
     expect(set?.file).toBe('openclaw')
-    expect(set?.args).toEqual(['mcp', 'set', 'mementos', '{"command":"mementos","args":["serve"]}'])
+    expect(set?.args).toEqual(['mcp', 'set', 'mementos', '{"command":"mementos","args":["mcp"]}'])
 
     const skill = await readFile(join(stateDir, 'workspace', 'skills', 'mementos', 'SKILL.md'), 'utf8')
     expect(skill.startsWith('---\nname: mementos\n')).toBe(true)

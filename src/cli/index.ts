@@ -13,10 +13,12 @@
  */
 import { runInit } from './commands/init.js'
 import {
-  runServe, runSessionStart,
+  runSessionStart,
   runList, runGet, runDelete, runSync, runSearch,
   runRecall, runWrite, runUpdate, runTags, runChronicle, runChronicles, runIndex,
 } from './commands/runtime.js'
+import { runStart, runStop } from './commands/daemon.js'
+import { runMcp } from './commands/mcp-shim.js'
 import { runIntegration } from './commands/admin.js'
 import { runShareKey } from './commands/share-key.js'
 import { runDestroy } from './commands/destroy.js'
@@ -53,7 +55,12 @@ const [, , command, subcommand, ...args] = process.argv
 try {
   switch (command) {
     case 'init':        await runInit(); break
-    case 'serve':       await runServe(); break
+    case 'mcp':         await runMcp(); break
+    // `serve` is a back-compat alias of `mcp` for one minor version — old
+    // integration configs that still say `mementos serve` continue to work.
+    case 'serve':       await runMcp(); break
+    case 'start':       await runStart(); break
+    case 'stop':        await runStop(); break
     case 'session-start': await runSessionStart(); break
     case 'list':        await runList(subcommand, args); break
     case 'get':         await runGet(subcommand); break

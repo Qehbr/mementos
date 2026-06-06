@@ -1,15 +1,21 @@
 /**
- * `mementos snapshot` — Claude Code's PreCompact hook entrypoint. Reads the hook payload
- * from stdin, routes the named transcript through the matching Ingestor, and ingests it.
- * Quiet by default: Claude Code logs hook stdout into the transcript itself, so noise
- * here pollutes the user's conversation.
+ * `mementos snapshot` — PreCompact hook entrypoint. Reads the hook payload
+ * from stdin, parses the named transcript via the matching Ingestor, then
+ * forwards every session to the running daemon as one
+ * `POST /api/hooks/ingest_chronicle` call. The daemon does the actual
+ * `vault.ingest(...)` — no own vault built here.
+ *
+ * Auto-starts the daemon if it isn't running (hooks fire automatically; can't
+ * ask the LLM to do it). Quiet by default: the AI client logs hook stdout
+ * into the transcript itself, so noise here pollutes the user's conversation.
  */
-import { buildVault } from '../_utils/vault.js'
 import { loadIngestors } from '../../ingestors/registry.js'
 import { findIngestor } from '../../ingestors/_utils/dispatch.js'
+import { ensureDaemonRunning } from './daemon.js'
+import { ingestChronicle, DaemonUnavailableError } from '../../daemon/api-client.js'
 
 interface PreCompactPayload {
-  /** Path to the current session's JSONL transcript. Claude Code provides this. */
+  /** Path to the current session's JSONL transcript. AI client provides this. */
   transcript_path?: string
   /** Free-form fields we don't use today. */
   [k: string]: unknown
@@ -23,6 +29,9 @@ export async function runSnapshot(payload?: PreCompactPayload): Promise<void> {
     process.exit(1)
   }
 
+  // Parse the transcript locally — the ingestor knows the file format. The
+  // result is a list of structured sessions (each = one chronicle), each
+  // ready to ship to the daemon as-is.
   const ingestorReg = await loadIngestors()
   const ingestors = [...ingestorReg.values()].map(impl => impl.create())
   const ingestor = await findIngestor(transcriptPath, ingestors)
@@ -40,36 +49,29 @@ export async function runSnapshot(payload?: PreCompactPayload): Promise<void> {
   }
   if (sessions.length === 0) return // tool-use-only sessions ingest nothing; stay quiet
 
-  const vault = await buildVault()
-  await vault.startup()
+  await ensureDaemonRunning()
 
   let added = 0
   let skipped = 0
-  try {
-    // Hold the write lock once across all sessions — see the comment on the
-    // identical wrapper in `runIngest`; same in-process timer/long-write race
-    // applies here when a session embeds a large batch.
-    await vault.writeLock.run(async () => {
-      for (const s of sessions) {
-        try {
-          const r = await vault.ingest(s.chronicleId, s.mementos, {
-            tags: s.tags,
-            createdAt: s.createdAt,
-          })
-          added += r.added
-          skipped += r.skipped
-        } catch (e) {
-          // Don't exit-immediately on a per-chronicle failure: the finally below needs to
-          // flush the cache for the 0..N-1 that succeeded, or every failed snapshot drifts
-          // the cache one ingest behind.
-          console.error(`mementos snapshot: ingest failed for chronicle ${s.chronicleId}: ${(e as Error).message}`)
-          process.exitCode = 1
-          break
-        }
+  for (const s of sessions) {
+    try {
+      const r = await ingestChronicle({
+        chronicle_id: s.chronicleId,
+        mementos: s.mementos,
+        tags: s.tags,
+        createdAt: s.createdAt,
+      })
+      added += r.added
+      skipped += r.skipped
+    } catch (e) {
+      if (e instanceof DaemonUnavailableError) {
+        console.error(`mementos snapshot: ${e.message}`)
+        process.exitCode = 1
+        break
       }
-    })
-  } finally {
-    await vault.close()
+      console.error(`mementos snapshot: ingest failed for chronicle ${s.chronicleId}: ${(e as Error).message}`)
+      process.exitCode = 1
+    }
   }
   if (added > 0) console.log(`mementos snapshot: +${added} new memento(s), ${skipped} already present`)
 }

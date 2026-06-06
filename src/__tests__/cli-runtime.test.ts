@@ -1,130 +1,101 @@
 /**
- * Argument-parsing tests for the new MCP-parity CLI handlers.
+ * Argument-parsing tests for the MCP-parity CLI handlers.
  *
- * The handlers themselves are thin pass-throughs over `Vault.*` methods + the
- * `render*` functions (both already covered exhaustively). The risk surface
- * unique to the CLI layer is the argv → method-args translation: flag parsing,
- * positional fallbacks, stdin detection, and the mode switch inside `runList`
- * (range/query vs tag mode). Cover that here without spinning up a real vault.
+ * Each handler is a thin wrapper that parses argv into MCP tool args, then
+ * calls `callTool(name, args)` against the daemon. Two failure modes worth
+ * covering at the argv level:
+ *   1. Usage errors (missing required positional, empty id) — handler should
+ *      print usage to stderr and exit(1) BEFORE touching the daemon.
+ *   2. Successful argv parse → daemon call. With no daemon running in tests,
+ *      this hits `failNoDaemon` → exit(1) with the "Run `mementos start`"
+ *      message. We assert THAT message to verify the parse reached the daemon
+ *      step (i.e. argv parsing didn't bail with a usage error along the way).
+ *
+ * The daemon path itself (callTool over MCP HTTP) is covered by the daemon's
+ * own integration smokes.
  */
-import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect } from 'vitest'
 import { runList, runRecall, runWrite, runUpdate, runChronicle } from '../cli/commands/runtime.js'
 
-/** Stash + restore process.argv across each test so flag-parsing doesn't leak. */
-function withArgv<T>(argv: string[], fn: () => T): T {
-  const prev = process.argv
-  process.argv = ['node', 'mementos', ...argv]
-  try { return fn() }
-  finally { process.argv = prev }
+/** Run `fn` with `process.exit` and `console.error` stubbed; capture both. */
+async function captureExit(fn: () => Promise<void> | void): Promise<{ code: number; errors: string[] }> {
+  const errors: string[] = []
+  const origExit = process.exit
+  const origError = console.error
+  let code = 0
+  process.exit = ((c?: number) => { code = c ?? 0; throw new Error(`exit:${code}`) }) as never
+  console.error = (msg: string) => errors.push(msg)
+  try {
+    await fn()
+    return { code, errors }
+  } catch (e) {
+    if (e instanceof Error && e.message.startsWith('exit:')) return { code, errors }
+    throw e
+  } finally {
+    process.exit = origExit
+    console.error = origError
+  }
 }
 
-describe('CLI handler argv parsing — smoke', () => {
-  let originalCwd: string
-  beforeEach(() => { originalCwd = process.cwd() })
-  afterEach(() => { process.chdir(originalCwd) })
+describe('CLI handler argv parsing', () => {
+  // ─── Usage-error path: argv missing required input → exit BEFORE daemon ──
 
-  // Each handler bails to console.error + process.exit when args are missing.
-  // We can't easily assert on process.exit without monkey-patching, but we CAN
-  // verify the handler accepts the documented shapes without throwing a
-  // type/parse error. The vault layer (loaded via withVault) will throw a
-  // "no vault configured" message in these tests since we run without init —
-  // that's fine; we're verifying argv parsing reaches the vault call, not the
-  // vault response.
-
-  it('runRecall accepts a multi-word positional query', () => {
-    expect(() => withArgv(
-      ['recall', 'TypeScript', 'project', 'preferences', '--k=3'],
-      () => runRecall('TypeScript', ['project', 'preferences', '--k=3']),
-    )).not.toThrow()
+  it('runRecall errors with usage hint on empty query', async () => {
+    const { code, errors } = await captureExit(() => runRecall(undefined, []))
+    expect(code).toBe(1)
+    expect(errors.join('\n')).toMatch(/Usage: mementos recall/)
   })
 
-  it('runRecall surfaces a usage error on empty query', async () => {
-    // Empty subcommand + no positional args → handler should error before
-    // touching the vault. We check stderr without letting process.exit fire.
-    const errors: string[] = []
-    const origExit = process.exit
-    const origError = console.error
-    process.exit = ((code?: number) => { throw new Error(`exit:${code ?? 0}`) }) as never
-    console.error = (msg: string) => errors.push(msg)
-    try {
-      await expect(runRecall(undefined, [])).rejects.toThrow(/exit:1/)
-      expect(errors.join('\n')).toMatch(/Usage: mementos recall/)
-    } finally {
-      process.exit = origExit
-      console.error = origError
-    }
-  })
-
-  it('runWrite surfaces a usage error when stdin is TTY and no positional given', async () => {
-    const errors: string[] = []
-    const origExit = process.exit
-    const origError = console.error
+  it('runWrite errors with usage hint when stdin is TTY and no positional given', async () => {
     const origIsTTY = process.stdin.isTTY
     Object.defineProperty(process.stdin, 'isTTY', { value: true, configurable: true })
-    process.exit = ((code?: number) => { throw new Error(`exit:${code ?? 0}`) }) as never
-    console.error = (msg: string) => errors.push(msg)
     try {
-      await expect(runWrite(undefined, [])).rejects.toThrow(/exit:1/)
+      const { code, errors } = await captureExit(() => runWrite(undefined, []))
+      expect(code).toBe(1)
       expect(errors.join('\n')).toMatch(/Usage: mementos write/)
     } finally {
-      process.exit = origExit
-      console.error = origError
       Object.defineProperty(process.stdin, 'isTTY', { value: origIsTTY, configurable: true })
     }
   })
 
-  it('runUpdate refuses an empty id', async () => {
-    const errors: string[] = []
-    const origExit = process.exit
-    const origError = console.error
-    process.exit = ((code?: number) => { throw new Error(`exit:${code ?? 0}`) }) as never
-    console.error = (msg: string) => errors.push(msg)
-    try {
-      await expect(runUpdate(undefined, [])).rejects.toThrow(/exit:1/)
-      expect(errors.join('\n')).toMatch(/Usage: mementos update/)
-    } finally {
-      process.exit = origExit
-      console.error = origError
-    }
+  it('runUpdate errors with usage hint on empty id', async () => {
+    const { code, errors } = await captureExit(() => runUpdate(undefined, []))
+    expect(code).toBe(1)
+    expect(errors.join('\n')).toMatch(/Usage: mementos update/)
   })
 
-  it('runChronicle refuses an empty id', async () => {
-    const errors: string[] = []
-    const origExit = process.exit
-    const origError = console.error
-    process.exit = ((code?: number) => { throw new Error(`exit:${code ?? 0}`) }) as never
-    console.error = (msg: string) => errors.push(msg)
-    try {
-      await expect(runChronicle(undefined)).rejects.toThrow(/exit:1/)
-      expect(errors.join('\n')).toMatch(/Usage: mementos chronicle/)
-    } finally {
-      process.exit = origExit
-      console.error = origError
-    }
+  it('runChronicle errors with usage hint on empty id', async () => {
+    const { code, errors } = await captureExit(() => runChronicle(undefined))
+    expect(code).toBe(1)
+    expect(errors.join('\n')).toMatch(/Usage: mementos chronicle/)
   })
 
-  it('runList mode-switch: --start/--end/--query/--k toggles range mode', () => {
-    // The mode-switch decision lives entirely in argv parsing — verify it
-    // doesn't throw at the parse boundary for any of the trigger flags.
+  // ─── Happy-path argv: argv parses cleanly → reaches daemon → no daemon ──
+  // The "no mementos daemon running" error message is what argv parsing
+  // SUCCESS looks like in unit tests (we don't run a daemon). If a USAGE
+  // error fires instead, argv parsing failed earlier — that's the
+  // regression we're guarding against.
+
+  it('runRecall: multi-word positional + --k passes argv parsing', async () => {
+    const { errors } = await captureExit(() => runRecall('TypeScript', ['project', 'preferences', '--k=3']))
+    expect(errors.join('\n')).toMatch(/No mementos daemon running/)
+    expect(errors.join('\n')).not.toMatch(/Usage:/)
+  })
+
+  it('runList range-mode flags all pass argv parsing', async () => {
     for (const trigger of [['--start=2026-01-01'], ['--end=2026-12-31'], ['--query=foo'], ['--k=5']]) {
-      expect(() => withArgv(
-        ['list', ...trigger],
-        () => runList(undefined, trigger),
-      )).not.toThrow()
+      const { errors } = await captureExit(() => runList(undefined, trigger))
+      expect(errors.join('\n')).toMatch(/No mementos daemon running/)
     }
   })
 
-  it('runList tag mode: bare positional args treated as tags (back-compat)', () => {
-    expect(() => withArgv(
-      ['list', 'preference', 'user'],
-      () => runList('preference', ['user']),
-    )).not.toThrow()
+  it('runList tag-mode (positional) passes argv parsing', async () => {
+    const { errors } = await captureExit(() => runList('preference', ['user']))
+    expect(errors.join('\n')).toMatch(/No mementos daemon running/)
   })
 
-  it('runList tag mode via --tags flag', () => {
-    expect(() => withArgv(
-      ['list', '--tags=preference,user'],
-      () => runList(undefined, ['--tags=preference,user']),
-    )).not.toThrow()
+  it('runList tag-mode (--tags) passes argv parsing', async () => {
+    const { errors } = await captureExit(() => runList(undefined, ['--tags=preference,user']))
+    expect(errors.join('\n')).toMatch(/No mementos daemon running/)
   })
 })

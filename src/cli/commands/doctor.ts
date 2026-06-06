@@ -6,15 +6,16 @@
  * reported as "skipped (key unavailable)" rather than crashing with a raw crypto error.
  *
  * Order:
- *   1. Machine config         ~/.config/mementos/config.json exists and parses
- *   2. Vault path             directory exists and is readable
- *   3. Key                    provider.getKey() succeeds (env var set / keychain reachable)
- *   4. Storage                storage.list() succeeds (git remote reachable, etc)
- *   5. Vault config           vault.json exists in storage; embedder matches what's registered
- *   6. Decrypt probe          one .mem decrypts end-to-end — proves crypto + AAD + key work
- *   7. Embedder               embedder loads + can embed a sample string
- *   8. Index cache            ~/.config/mementos/cache/index.hnsw.enc presence / freshness (informational)
- *   9. Integrations           per-integration isInstalled() (+ hook status if applicable)
+ *   1.  Machine config         ~/.config/mementos/config.json exists and parses
+ *   2.  Vault path             directory exists and is readable
+ *   3.  Key                    provider.getKey() succeeds (env var set / keychain reachable)
+ *   4.  Storage                storage.list() succeeds (git remote reachable, etc)
+ *   5.  Vault config           vault.json exists in storage; embedder matches what's registered
+ *   6.  Decrypt probe          one .mem decrypts end-to-end — proves crypto + AAD + key work
+ *   7.  Embedder               embedder loads + can embed a sample string
+ *   8.  Index cache            ~/.config/mementos/cache/index.hnsw.enc presence / freshness (informational)
+ *   9.  Daemon                 is `mementos start` running? token file present + `0600`?
+ *   10. Integrations           per-integration isInstalled() (+ hook status if applicable)
  *
  * Exit codes:
  *   0  if every check is OK or informationally skipped (empty vault is fine)
@@ -29,6 +30,9 @@ import { memAad } from '../../core/vault/aad.js'
 import { MEM_EXTENSION } from '../../core/vault/constants.js'
 import { requireImpl, buildKeyProvider, buildStorageBackend, buildStorageAndKey } from '../_utils/vault.js'
 import { readManifest } from '../_utils/migration-manifest.js'
+import { isDaemonRunning } from '../../daemon/api-client.js'
+import { daemonUrl } from '../../daemon/endpoint.js'
+import { tokenFilePath } from '../../daemon/token.js'
 import type { MachineConfig, VaultConfig } from '../../core/types.js'
 import type { MemFile } from '../../core/vault/types.js'
 
@@ -85,6 +89,7 @@ export async function runDoctor(): Promise<void> {
 
   results.push(vaultConfig ? await checkEmbedder(vaultConfig) : skip('Embedder', 'vault config unavailable'))
   results.push(machine ? await checkIndexCache(machine) : skip('Index cache', 'machine config unavailable'))
+  results.push(await checkDaemon())
   results.push(...await checkIntegrations())
 
   for (const r of results) renderResult(r)
@@ -287,6 +292,38 @@ async function checkIndexCache(_machine: MachineConfig): Promise<CheckResult> {
       detail: 'not present — will be built on next vault startup (informational, not an error)',
     }
   }
+}
+
+async function checkDaemon(): Promise<CheckResult> {
+  const running = await isDaemonRunning()
+  if (!running) {
+    return {
+      name: 'Daemon', status: 'ok',
+      detail: 'not running (informational) — start with `mementos start` to use CLI commands or AI clients',
+    }
+  }
+  // Verify the token file is present + has the expected `0600` perms — without
+  // it, clients (CLI, shim, hooks) get a clean 401 from the daemon and the user
+  // would otherwise see a confusing "unauthorized" error from `mementos recall`.
+  const tokenPath = tokenFilePath()
+  try {
+    const s = await stat(tokenPath)
+    const mode = s.mode & 0o777
+    if (process.platform !== 'win32' && mode !== 0o600) {
+      return {
+        name: 'Daemon', status: 'fail',
+        detail: `running at ${daemonUrl()} but token file has unsafe perms (${mode.toString(8)})`,
+        hint: `fix:  chmod 600 ${tokenPath}   (or restart the daemon: \`mementos stop && mementos start\`)`,
+      }
+    }
+  } catch {
+    return {
+      name: 'Daemon', status: 'fail',
+      detail: `running at ${daemonUrl()} but token file missing at ${tokenPath}`,
+      hint: 'restart: `mementos stop && mementos start`',
+    }
+  }
+  return { name: 'Daemon', status: 'ok', detail: `running at ${daemonUrl()} (token OK)` }
 }
 
 async function checkIntegrations(): Promise<CheckResult[]> {

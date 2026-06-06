@@ -40,7 +40,7 @@ describe('AntigravityCliIntegration', () => {
     }
     expect(manifest.name).toBe('mementos')
     expect(manifest.version).toBeTruthy()
-    expect(manifest.mcpServers['mementos']).toEqual({ command: 'mementos', args: ['serve'] })
+    expect(manifest.mcpServers['mementos']).toEqual({ command: 'mementos', args: ['mcp'] })
 
     const skill = await readFile(skillPath(), 'utf8')
     expect(skill.startsWith('---')).toBe(true)  // YAML frontmatter required by Antigravity's skill loader

@@ -32,7 +32,7 @@ describe('CursorIntegration', () => {
     const config = JSON.parse(await readFile(configPath(), 'utf8')) as {
       mcpServers: Record<string, { command: string; args: string[] }>
     }
-    expect(config.mcpServers['mementos']).toEqual({ command: 'mementos', args: ['serve'] })
+    expect(config.mcpServers['mementos']).toEqual({ command: 'mementos', args: ['mcp'] })
   })
 
   it('isInstalled reflects the mcp entry', async () => {

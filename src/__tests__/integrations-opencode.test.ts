@@ -39,7 +39,7 @@ describe('OpenCodeIntegration', () => {
     }
     expect(config.mcp['mementos']).toEqual({
       type: 'local',
-      command: ['mementos', 'serve'],
+      command: ['mementos', 'mcp'],
       enabled: true,
     })
 

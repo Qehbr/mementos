@@ -958,7 +958,7 @@ export class Vault {
    * memento "in range"). With a `query`, results are ranked by the retriever and trimmed
    * to top-k; without one, returned reverse-chronological.
    */
-  async getMementosInRange(start?: string, end?: string, query?: string, k = DEFAULT_RECENT_LIMIT): Promise<MementoSummary[]> {
+  async getMementosInRange(start?: string, end?: string, query?: string, k = DEFAULT_RECENT_LIMIT, tags?: string[]): Promise<MementoSummary[]> {
     await this.syncIfStale()
     if (this.metaById.size === 0) return []
 
@@ -968,10 +968,9 @@ export class Vault {
     // end is extended to the day's last instant, matching the "inclusive" contract.
     const endBound = end && /^\d{4}-\d{2}-\d{2}$/.test(end) ? end + 'T23:59:59.999Z' : end
 
-    if (!query) {
-      // No query: take recency-ordered prefix bounded by the date range. valuesInRange
-      // walks the existing recency linked list from the head and early-bails past `start`
-      // — O(range_size) for recent ranges instead of O(corpus).
+    if (!query && !tags?.length) {
+      // Fast path — no query, no tag filter: walk the recency linked list head→tail,
+      // early-bail past `start`. O(range_size) for recent ranges instead of O(corpus).
       const ids: string[] = []
       const limit = Math.max(1, k)
       for (const meta of this.metaById.valuesInRange(start, endBound)) {
@@ -982,10 +981,24 @@ export class Vault {
       return this.loadSummaries(ids)
     }
 
-    // Query: resolve the date predicate to an allowed memento-id set via MetaStore, then
-    // rank semantically restricted to that set (native filteredSearch in the index).
-    const allowed = this.metaById.idsMatchingFilter({ start, end: endBound })
+    // Tag or query (or both) → resolve the predicate to an allowed id set. `tags` is
+    // a union (matches any one tag); `start`/`end`/`tags` all stack via the same filter.
+    const allowed = this.metaById.idsMatchingFilter({ start, end: endBound, tags })
     if (allowed.size === 0) return []
+
+    if (!query) {
+      // No query → recency-sort the allowed set, take top k. Sort cost is bounded by the
+      // filter set, not the corpus, so tag-narrowed listings stay fast.
+      const sorted = [...allowed]
+        .map(id => this.metaById.get(id))
+        .filter((m): m is NonNullable<typeof m> => !!m)
+        .sort((a, b) => b.updated_at.localeCompare(a.updated_at))
+        .slice(0, Math.max(1, k))
+        .map(m => m.id)
+      return this.loadSummaries(sorted)
+    }
+
+    // Query → semantic rank restricted to the allowed set (native filteredSearch).
     const { order } = await this.rankSemantic(query, k, allowed)
     const ranked = order.slice(0, k)
     if (ranked.length === 0) return []

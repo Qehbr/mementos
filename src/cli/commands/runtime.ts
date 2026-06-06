@@ -1,238 +1,58 @@
 /**
- * Runtime subcommands — everything that operates on an already-initialised vault.
+ * CLI vault commands — every one is a thin MCP HTTP client of the daemon. The
+ * CLI never builds its own vault; the daemon owns the single in-memory copy.
  *
- * Two surfaces use these:
- *   1. AI clients via MCP (`serve` runs the stdio server).
- *   2. AI clients OR users via CLI (`recall`/`write`/`update`/...).
+ * Each handler:
+ *   1. Parses CLI flags (positional + `--foo=bar`) into MCP tool arguments
+ *   2. Calls `callTool(name, args)` against the running daemon
+ *   3. Prints the rendered text or surfaces a clear error
+ *   4. Refuses (exit 1) with "Run `mementos start` first" when no daemon
  *
- * The CLI commands deliberately mirror the MCP tool names so a user with a
- * shell-capable AI client (Claude Code, Codex, etc.) can opt out of MCP and
- * still get the full operation set.
+ * The strict no-auto-start posture is deliberate: CLI commands are user-typed,
+ * so a clean error pointing at `mementos start` is more honest than silently
+ * spawning a daemon they didn't ask for. (Hooks and the `mementos mcp` shim
+ * auto-start — they run automatically and can't ask the user.)
  *
- * Special hook entry points:
- *   - `serve`         long-running MCP server (called by AI clients, not by hand)
- *   - `session-start` short-lived hook handler — emits the curated index memento
- *                     as a prelude at conversation start
+ * Tool-name → CLI-command map mirrors `src/core/mcp.ts`:
+ *
+ *   recall       → recall, write_memento → write, update_memento → update,
+ *   get_tags     → tags, get_memento → get, delete_memento → delete,
+ *   get_chronicle → chronicle, list_chronicles → chronicles,
+ *   get_memory_index / update_memory_index → index (read vs. update),
+ *   list_mementos → list, search → search, sync → sync
+ *
+ * Hook entry points (`session-start`, `snapshot`) stay vault-aware for now
+ * — Phase 4 will refactor them to auto-start the daemon then proxy.
  */
-import type { Vault } from '../../core/vault/index.js'
-import { createMcpServer } from '../../core/mcp.js'
-import {
-  renderMemento, renderMementoIndex, renderMementoList, renderSearch,
-  renderRecall, renderTags, renderChronicle, renderChronicleList,
-  renderWrite, renderUpdate, formatSyncCounts,
-} from '../../core/render.js'
-import { buildVault, withVault } from '../_utils/vault.js'
 import { parseFlag } from '../_utils/flags.js'
-import { registerServe } from '../_utils/serve-registry.js'
-import { logRetrieveFailure } from '../_utils/retrieve-log.js'
 import { readMachineConfig } from '../../core/config.js'
-import {
-  DEFAULT_RECALL_K, DEFAULT_RECENT_LIMIT, DEFAULT_SEARCH_CONTEXT_CHARS,
-  MAX_RECALL_K, MAX_RECENT_LIMIT,
-} from '../../core/vault/constants.js'
-import { StaleMementoError, DuplicateMementoError, ReservedIndexTagError } from '../../core/vault/index.js'
-
-export async function runServe(): Promise<void> {
-  const vault = await buildVault()
-  // Rejection handler before startup so model load / native binding init / MCP SDK import
-  // failures are caught; shutdown handlers after, so a failed startup exits via its own path.
-  installCrashTolerantRejectionHandler()
-
-  await vault.startup().catch((e: Error) => {
-    console.error(e.message)
-    process.exit(1)
-  })
-
-  // Marks this process so `mementos migrate` refuses while it's alive.
-  await registerServe()
-  installShutdownHandlers(vault)
-
-  const machine = await readMachineConfig()
-  const searchEnabled = machine.searcher !== 'none'
-
-  const { StdioServerTransport } = await import('@modelcontextprotocol/sdk/server/stdio.js')
-  const server = createMcpServer(vault, { searchEnabled })
-  await server.connect(new StdioServerTransport())
-}
-
-function installCrashTolerantRejectionHandler(): void {
-  // Replace cli/index.ts's process-wide exit(1) handler — a stray rejection from a peer
-  // dep must not kill an open MCP session.
-  process.removeAllListeners('unhandledRejection')
-  process.on('unhandledRejection', (reason: unknown) => {
-    const err = reason instanceof Error ? reason : new Error(String(reason))
-    console.error(`mementos serve: unhandled rejection (continuing): ${err.message}`)
-    if (process.env['MEMENTOS_DEBUG']) console.error(err.stack)
-  })
-}
-
-function installShutdownHandlers(vault: Vault): void {
-  // Flag (not `once`) so a repeat signal during vault.close() is absorbed — `once`
-  // self-unregisters and lets Node's default handler terminate mid-flush.
-  let shuttingDown = false
-  const shutdown = (): void => {
-    if (shuttingDown) return
-    shuttingDown = true
-    void vault.close().finally(() => process.exit(0))
-  }
-  process.on('SIGINT', shutdown)
-  process.on('SIGTERM', shutdown)
-  // SIGHUP: Node's default is termination, so we need an explicit handler to flush.
-  process.on('SIGHUP', shutdown)
-}
+import { logRetrieveFailure } from '../_utils/retrieve-log.js'
+import { callTool, DaemonUnavailableError } from '../../daemon/api-client.js'
+import { ensureDaemonRunning } from './daemon.js'
+import { DEFAULT_RECALL_K, DEFAULT_RECENT_LIMIT, DEFAULT_SEARCH_CONTEXT_CHARS, MAX_RECALL_K, MAX_RECENT_LIMIT } from '../../core/vault/constants.js'
 
 /**
- * Hook entry point for SessionStart. Seeds the `_index` memento if missing,
- * then emits its body as a `[MEMORY-INDEX]` prelude — once per conversation,
- * not per user message. Auto-retrieve handles the per-message recall path.
+ * SessionStart hook entry point. Auto-starts the daemon if needed (hooks fire
+ * before the LLM speaks — no user to nudge), then prints the curated
+ * memory-index memento under a `[MEMORY-INDEX]` prelude. The daemon's
+ * `get_memory_index` tool returns either the index text or a brief
+ * "no index yet — call update_memory_index" placeholder; we surface either
+ * one verbatim under the prelude so the AI sees the situation.
  *
- * Quiet on error (same fail-silent policy as `runRetrieve`): a broken hook
- * must not block the user's chat. Debug log is gated on MEMENTOS_DEBUG.
+ * Fail-silent on errors (broken hook must not block the user's chat). Debug
+ * logging gated on `MEMENTOS_DEBUG`.
  */
 export async function runSessionStart(): Promise<void> {
-  let vault: Awaited<ReturnType<typeof buildVault>> | null = null
   try {
-    vault = await buildVault()
-    await vault.startup()
-    await vault.seedIndexIfMissing()
-    const text = await vault.getIndexText()
+    await ensureDaemonRunning()
+    const text = await callTool('get_memory_index', {})
     if (text) process.stdout.write(`[MEMORY-INDEX]\n${text}\n`)
   } catch (e) {
     if (process.env['MEMENTOS_DEBUG']) await logRetrieveFailure(e)
-  } finally {
-    if (vault) await vault.close().catch(() => { /* fail-silent hook */ })
   }
 }
 
-
-
-/**
- * `mementos list [tag1 tag2 ...] [--tags=a,b] [--start=...] [--end=...] [--query=...] [--k=N]`
- *
- * Two modes, picked automatically:
- *   - **Range/query mode**: any of `--start`/`--end`/`--query`/`--k` present.
- *     Mirrors the MCP `list_mementos` tool — date-bounded recency or semantic ranking.
- *   - **Tag mode** (back-compat): positional args OR `--tags=...` filter by tag.
- *     Same shape as `mementos list` before this CLI got parity with MCP.
- */
-export async function runList(subcommand: string | undefined, args: string[]): Promise<void> {
-  const start = parseFlag('start')
-  const end = parseFlag('end')
-  const query = parseFlag('query')
-  const kFlag = parseFlag('k')
-  const rangeMode = start !== undefined || end !== undefined || query !== undefined || kFlag !== undefined
-
-  await withVault(async vault => {
-    if (rangeMode) {
-      const k = Math.min(MAX_RECENT_LIMIT, Number(kFlag) || DEFAULT_RECENT_LIMIT)
-      const items = await vault.getMementosInRange(start, end, query, k)
-      const emptyMsg = start || end ? 'No mementos found in that date range.' : 'No memories stored.'
-      console.log(renderMementoList(items, emptyMsg))
-      return
-    }
-    const tagsFromFlag = parseTagList('tags')
-    const tagsFromPositional = [subcommand, ...args].filter((a): a is string => !!a && !a.startsWith('-'))
-    const tags = tagsFromFlag ?? (tagsFromPositional.length > 0 ? tagsFromPositional : undefined)
-    const items = await vault.listMementos(tags)
-    const emptyMessage = tags ? 'No memories match the given tags.' : 'No memories stored.'
-    console.log(renderMementoIndex(items, emptyMessage))
-  })
-}
-
-/**
- * Catch the two vault errors that name a memento id the user couldn't otherwise discover
- * (`Invalid id:` and `Memory not found:`) and append a pointer to `mementos list`. CLI-only —
- * the MCP path got the id from a prior recall, so this hint would just be noise there.
- */
-const LIST_HINT = '— run `mementos list` to see existing memento ids.'
-async function withListHint<T>(fn: () => Promise<T>): Promise<T> {
-  try { return await fn() }
-  catch (e) {
-    if (e instanceof Error
-      && (e.message.startsWith('Invalid id:') || e.message.startsWith('Memory not found:'))
-      && !e.message.includes(LIST_HINT)) {
-      throw new Error(`${e.message} ${LIST_HINT}`)
-    }
-    throw e
-  }
-}
-
-export async function runGet(id: string | undefined): Promise<void> {
-  if (!id) { console.error('Usage: mementos get <id>'); process.exit(1) }
-  await withVault(async vault => {
-    const detail = await withListHint(() => vault.getMemento(id))
-    if (!detail) {
-      console.error(`Memory not found: ${id} ${LIST_HINT}`)
-      process.exitCode = 1
-      return
-    }
-    console.log(renderMemento(detail, id))
-  })
-}
-
-export async function runDelete(id: string | undefined): Promise<void> {
-  if (!id) { console.error('Usage: mementos delete <id>'); process.exit(1) }
-  await withVault(async vault => {
-    await withListHint(() => vault.deleteMemento(id))
-    console.log(`Deleted ${id}`)
-  })
-}
-
-/**
- * `mementos sync` — pull the latest memories from storage now, instead of waiting for
- * the ~10-minute auto-sync. Useful right after pushing memories from another device.
- */
-export async function runSync(): Promise<void> {
-  await withVault(async vault => {
-    const counts = formatSyncCounts(await vault.sync())
-    console.log(counts === null ? 'Already up to date.' : `Synced: ${counts}.`)
-  })
-}
-
-/**
- * `mementos search <query>` — exhaustive lexical search across all mementos. Literal
- * substring by default; `--regex` for a regular expression. Prints short snippets with
- * surrounding context, not whole mementos. Refuses with a hint if the searcher is `none`.
- *
- * Flags: `--regex`, `--k=N` (max snippets, default 5), `--context=N` (context chars per
- * side, default 48), `--case-sensitive` (matching is case-insensitive by default).
- */
-export async function runSearch(subcommand: string | undefined, args: string[]): Promise<void> {
-  const query = [subcommand, ...args]
-    .filter((a): a is string => !!a && !a.startsWith('-'))
-    .join(' ')
-  if (!query) {
-    console.error('Usage: mementos search <query> [--regex] [--k=N] [--context=N] [--case-sensitive]')
-    process.exit(1)
-  }
-
-  // Short-circuit on `searcher = none` BEFORE building a vault. ENOENT means "not
-  // initialised" — let buildVault throw its actionable message.
-  const machine = await readMachineConfig().catch(() => null)
-  if (machine && machine.searcher === 'none') {
-    console.error('Deep search is disabled on this machine (searcher = none).')
-    console.error('Enable it with:  mementos init --reinit --searcher=scan')
-    process.exit(1)
-  }
-
-  await withVault(async vault => {
-    const k = Number(parseFlag('k')) || DEFAULT_RECALL_K
-    const contextChars = Number(parseFlag('context')) || DEFAULT_SEARCH_CONTEXT_CHARS
-    const regex = parseFlag('regex') !== undefined
-    const ignoreCase = parseFlag('case-sensitive') === undefined
-    console.log(renderSearch(
-      await vault.search(query, contextChars, regex, ignoreCase), k,
-      // Override the MCP-default follow-up — get_memento is an MCP tool name, not a CLI cmd.
-      { followUp: 'Run `mementos get <id>` for a memento\'s full text.' },
-    ))
-  })
-}
-
-// ─── CLI parity with MCP tools ────────────────────────────────────────────────
-// Each handler mirrors one MCP tool from `src/core/mcp.ts` so users with
-// shell-capable AI clients can call the same operations via shell instead of
-// going through the stdio MCP server. The vault methods + render functions are
-// shared; only the input-parsing and output-printing varies.
+// ─── Helpers ─────────────────────────────────────────────────────────────────
 
 /** Parse `--<flag>=a,b,c` into ['a','b','c'], or undefined if absent. */
 function parseTagList(flag: string): string[] | undefined {
@@ -241,10 +61,7 @@ function parseTagList(flag: string): string[] | undefined {
   return raw.split(',').map(t => t.trim()).filter(Boolean)
 }
 
-/** Read all of stdin (non-TTY only) and return the trimmed result, or null
- *  when stdin is a TTY (interactive shell). The 1 MB cap matches what the
- *  retired retrieve hook used — long enough for real memos, bounded enough to
- *  protect against accidental pastes. */
+/** Stdin text (non-TTY only), null otherwise. 1 MB cap. */
 const MAX_STDIN_CHARS = 1024 * 1024
 async function readStdinText(): Promise<string | null> {
   if (process.stdin.isTTY) return null
@@ -262,46 +79,66 @@ async function readStdinText(): Promise<string | null> {
   })
 }
 
+/** Concatenate the positional bits of `subcommand + args` into a string
+ *  (whitespace-joined). Skips anything starting with `--`. */
+function positionalArgs(subcommand: string | undefined, args: string[]): string {
+  return [subcommand, ...args]
+    .filter((a): a is string => !!a && !a.startsWith('-'))
+    .join(' ')
+}
+
+/** Print + exit(1) when no daemon is up — single source of the message. */
+function failNoDaemon(): never {
+  console.error('No mementos daemon running. Start one with: mementos start')
+  process.exit(1)
+}
+
+/**
+ * Single wrapper around `callTool` that turns the MCP HTTP roundtrip into a
+ * "print to stdout, exit 1 on daemon errors" CLI contract. Daemon error
+ * messages (duplicate-memento warning, stale-write retry hint, not-found,
+ * etc.) get printed verbatim with exit 1 — they're already actionable text
+ * authored for AI/user consumption.
+ */
+async function callAndPrint(name: string, args: Record<string, unknown>): Promise<void> {
+  try {
+    const text = await callTool(name, args)
+    if (text) console.log(text)
+  } catch (e) {
+    if (e instanceof DaemonUnavailableError) failNoDaemon()
+    console.error((e as Error).message)
+    process.exit(1)
+  }
+}
+
+// ─── Commands ────────────────────────────────────────────────────────────────
+
 /** `mementos recall <query> [--k=N] [--tags=a,b] [--exclude-tags=a,b] [--chronicle=id]` */
 export async function runRecall(subcommand: string | undefined, args: string[]): Promise<void> {
-  const query = [subcommand, ...args].filter((a): a is string => !!a && !a.startsWith('-')).join(' ')
+  const query = positionalArgs(subcommand, args)
   if (!query) {
     console.error('Usage: mementos recall <query> [--k=N] [--tags=a,b] [--exclude-tags=a,b] [--chronicle=id]')
     process.exit(1)
   }
-  await withVault(async vault => {
-    const k = Math.min(MAX_RECALL_K, Number(parseFlag('k')) || DEFAULT_RECALL_K)
-    const tags = parseTagList('tags')
-    const excludeTags = parseTagList('exclude-tags')
-    const chronicleId = parseFlag('chronicle')
-    console.log(renderRecall(await vault.recall(query, k, chronicleId, tags, excludeTags)))
+  await callAndPrint('recall', {
+    query,
+    k: Math.min(MAX_RECALL_K, Number(parseFlag('k')) || DEFAULT_RECALL_K),
+    tags: parseTagList('tags'),
+    exclude_tags: parseTagList('exclude-tags'),
+    chronicle_id: parseFlag('chronicle'),
   })
 }
 
 /** `mementos write [<text>] [--tags=a,b]` — text via positional OR piped stdin. */
 export async function runWrite(subcommand: string | undefined, args: string[]): Promise<void> {
   const fromStdin = await readStdinText()
-  const positional = [subcommand, ...args].filter((a): a is string => !!a && !a.startsWith('-')).join(' ').trim()
-  const text = fromStdin && fromStdin.length > 0 ? fromStdin : positional
+  const text = (fromStdin && fromStdin.length > 0) ? fromStdin : positionalArgs(subcommand, args).trim()
   if (!text) {
     console.error('Usage: mementos write <text> [--tags=a,b]')
     console.error('       echo "text" | mementos write [--tags=a,b]')
     process.exit(1)
   }
-  const tags = parseTagList('tags')
-  await withVault(async vault => {
-    try {
-      console.log(renderWrite(await vault.writeMemento({ text, tags })))
-    } catch (e) {
-      // Surface the duplicate-warning text directly — same payload the MCP path returns.
-      if (e instanceof DuplicateMementoError || e instanceof ReservedIndexTagError) {
-        console.error(e.message)
-        process.exitCode = 1
-        return
-      }
-      throw e
-    }
-  })
+  await callAndPrint('write_memento', { text, tags: parseTagList('tags') })
 }
 
 /** `mementos update <id> [<text>] [--tags=a,b]` — text via positional OR piped stdin. */
@@ -314,62 +151,108 @@ export async function runUpdate(subcommand: string | undefined, args: string[]):
   }
   const fromStdin = await readStdinText()
   const positional = args.filter(a => !a.startsWith('-')).join(' ').trim()
-  const text = fromStdin && fromStdin.length > 0 ? fromStdin : positional
+  const text = (fromStdin && fromStdin.length > 0) ? fromStdin : positional
   if (!text) {
     console.error('Usage: mementos update <id> <text> [--tags=a,b]')
     process.exit(1)
   }
-  const tags = parseTagList('tags')
-  await withVault(async vault => {
-    try {
-      console.log(renderUpdate(await vault.updateMemento(id, text, tags)))
-    } catch (e) {
-      if (e instanceof StaleMementoError) {
-        console.error(e.message)
-        process.exitCode = 1
-        return
-      }
-      throw e
-    }
-  })
+  await callAndPrint('update_memento', { memento_id: id, text, tags: parseTagList('tags') })
 }
 
 /** `mementos tags` — list every tag with its usage count. */
 export async function runTags(): Promise<void> {
-  await withVault(async vault => {
-    console.log(renderTags(await vault.getTags()))
-  })
+  await callAndPrint('get_tags', {})
 }
 
-/** `mementos chronicle <id>` — read a whole chronicle (conversation) in order. */
+/** `mementos chronicle <id>` — read a whole chronicle in order. */
 export async function runChronicle(id: string | undefined): Promise<void> {
   if (!id) { console.error('Usage: mementos chronicle <chronicle-id>'); process.exit(1) }
-  await withVault(async vault => {
-    console.log(renderChronicle(await vault.getChronicle(id), id))
-  })
+  await callAndPrint('get_chronicle', { chronicle_id: id })
 }
 
-/** `mementos chronicles` — list every chronicle with its memento count + start time. */
+/** `mementos chronicles` — list every chronicle with memento count + start time. */
 export async function runChronicles(): Promise<void> {
-  await withVault(async vault => {
-    console.log(renderChronicleList(await vault.listChronicles()))
-  })
+  await callAndPrint('list_chronicles', {})
 }
 
-/** `mementos index [<text>]` — read the curated memory-index memento, or
- *  replace its body when a positional arg or piped stdin is provided. */
+/** `mementos index [<text>]` — read the curated index memento, or replace it
+ *  when a positional arg or piped stdin is provided. */
 export async function runIndex(subcommand: string | undefined, args: string[]): Promise<void> {
   const fromStdin = await readStdinText()
-  const positional = [subcommand, ...args].filter((a): a is string => !!a && !a.startsWith('-')).join(' ').trim()
-  const text = fromStdin && fromStdin.length > 0 ? fromStdin : positional
-  await withVault(async vault => {
-    if (text) {
-      console.log(renderUpdate(await vault.updateIndex(text)))
-      return
-    }
-    const entry = await vault.getIndexEntry()
-    if (entry) console.log(entry.text)
-    else console.log('No memory index yet — run `mementos index "<text>"` (or pipe text in) to create one.')
+  const text = (fromStdin && fromStdin.length > 0) ? fromStdin : positionalArgs(subcommand, args).trim()
+  if (text) {
+    await callAndPrint('update_memory_index', { text })
+    return
+  }
+  await callAndPrint('get_memory_index', {})
+}
+
+/**
+ * `mementos list [tag1 tag2 ...] [--tags=a,b] [--start=...] [--end=...] [--query=...] [--k=N]`
+ *
+ * Range/query mode (any of `--start`/`--end`/`--query`/`--k`) maps to the MCP
+ * `list_mementos` tool, with tag-mode (positional args or `--tags=`) routing
+ * to the same tool via the `tags` arg the daemon now honors.
+ */
+export async function runList(subcommand: string | undefined, args: string[]): Promise<void> {
+  // Every filter stacks at the daemon. Collect what's set and forward — the
+  // MCP `list_mementos` tool composes date + query + tags into one filter.
+  const tagsFromFlag = parseTagList('tags')
+  const tagsFromPositional = [subcommand, ...args].filter((a): a is string => !!a && !a.startsWith('-'))
+  const tags = tagsFromFlag ?? (tagsFromPositional.length > 0 ? tagsFromPositional : undefined)
+  const kFlag = parseFlag('k')
+  await callAndPrint('list_mementos', {
+    start: parseFlag('start'),
+    end: parseFlag('end'),
+    query: parseFlag('query'),
+    tags,
+    k: Math.min(MAX_RECENT_LIMIT, Number(kFlag) || DEFAULT_RECENT_LIMIT),
   })
 }
 
+/**
+ * `mementos get <id>` — print the full text of one memento.
+ */
+export async function runGet(id: string | undefined): Promise<void> {
+  if (!id) { console.error('Usage: mementos get <id>'); process.exit(1) }
+  await callAndPrint('get_memento', { memento_id: id })
+}
+
+/** `mementos delete <id>` — delete one memento. */
+export async function runDelete(id: string | undefined): Promise<void> {
+  if (!id) { console.error('Usage: mementos delete <id>'); process.exit(1) }
+  await callAndPrint('delete_memento', { memento_id: id })
+}
+
+/** `mementos sync` — pull the latest memories from storage now. */
+export async function runSync(): Promise<void> {
+  await callAndPrint('sync', {})
+}
+
+/**
+ * `mementos search <query>` — exact lexical search.
+ *
+ * Local short-circuit on `searcher = none` for a friendlier error than the
+ * "unknown tool" the daemon would otherwise return (we register the `search`
+ * tool only when a searcher is configured).
+ */
+export async function runSearch(subcommand: string | undefined, args: string[]): Promise<void> {
+  const query = positionalArgs(subcommand, args)
+  if (!query) {
+    console.error('Usage: mementos search <query> [--regex] [--k=N] [--context=N] [--case-sensitive]')
+    process.exit(1)
+  }
+  const machine = await readMachineConfig().catch(() => null)
+  if (machine && machine.searcher === 'none') {
+    console.error('Deep search is disabled on this machine (searcher = none).')
+    console.error('Enable it with:  mementos init --reinit --searcher=scan')
+    process.exit(1)
+  }
+  await callAndPrint('search', {
+    query,
+    k: Number(parseFlag('k')) || DEFAULT_RECALL_K,
+    context_chars: Number(parseFlag('context')) || DEFAULT_SEARCH_CONTEXT_CHARS,
+    regex: parseFlag('regex') !== undefined,
+    ignore_case: parseFlag('case-sensitive') === undefined,
+  })
+}

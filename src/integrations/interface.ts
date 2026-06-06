@@ -21,7 +21,7 @@
  * client. Note: secrets are NEVER passed via argv; the `mementos serve` subprocess reads
  * the vault key from the OS keychain at startup.
  */
-export const MCP_SERVER_COMMAND = ['mementos', 'serve'] as const
+export const MCP_SERVER_COMMAND = ['mementos', 'mcp'] as const
 
 /**
  * Shell command for the SessionStart hook — emits the curated `_index` memento

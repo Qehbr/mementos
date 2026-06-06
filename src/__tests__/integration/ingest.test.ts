@@ -18,9 +18,25 @@ import { setupTestEnv, runInitWithFlags, type IntegrationContext } from './_help
 import { decryptMemMeta } from '../../core/vault/aad.js'
 import { deriveKeyFromEntropy } from '../../keys/_utils/derivation/index.js'
 import type { MemFile, MemMeta } from '../../core/vault/types.js'
+import type { Vault } from '../../core/vault/index.js'
+
+// Ingest now POSTs each chronicle to the daemon's /api/hooks/ingest_chronicle.
+// In tests we don't start a daemon — we mock the api-client + the auto-start
+// helper so the POST is shorted into a direct `vault.ingest` call against a
+// vault built in-process. The parse + dispatch + ingest pipeline is still
+// exercised end-to-end; the network hop is the only thing skipped.
+vi.mock('../../daemon/api-client.js', async () => {
+  const actual = await vi.importActual<typeof import('../../daemon/api-client.js')>('../../daemon/api-client.js')
+  return { ...actual, ingestChronicle: vi.fn() }
+})
+vi.mock('../../cli/commands/daemon.js', async () => {
+  const actual = await vi.importActual<typeof import('../../cli/commands/daemon.js')>('../../cli/commands/daemon.js')
+  return { ...actual, ensureDaemonRunning: vi.fn().mockResolvedValue(undefined) }
+})
 
 describe('mementos ingest', () => {
   let ctx: IntegrationContext
+  let vault: Vault | null = null
 
   /** Read a `.mem` file and decrypt its `meta` payload — v3 keeps all metadata encrypted. */
   async function readMeta(id: string): Promise<MemMeta> {
@@ -35,9 +51,20 @@ describe('mementos ingest', () => {
       '--backend=local', '--embedder=minilm', '--index=hnsw',
       '--key=env', '--integrations=none',
     ])
+    const { buildVault } = await import('../../cli/_utils/vault.js')
+    vault = await buildVault()
+    await vault.startup()
+    const { ingestChronicle } = await import('../../daemon/api-client.js')
+    vi.mocked(ingestChronicle).mockImplementation(async ({ chronicle_id, mementos, tags, createdAt }) => {
+      return vault!.ingest(chronicle_id, mementos, { tags, createdAt })
+    })
   })
 
-  afterEach(async () => { await ctx.cleanup() })
+  afterEach(async () => {
+    vi.restoreAllMocks()
+    if (vault) { await vault.close(); vault = null }
+    await ctx.cleanup()
+  })
 
   /**
    * Capture console.log / console.error for one ingest invocation. Auto-injects

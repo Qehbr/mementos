@@ -25,11 +25,12 @@ import { join, sep } from 'node:path'
 import { checkbox, input, confirm } from '@inquirer/prompts'
 import { WizardHeader } from '../_utils/prompts.js'
 import { promptTheme, checkboxTheme, dim } from '../_utils/style.js'
-import { buildVault } from '../_utils/vault.js'
 import { parseFlag } from '../_utils/flags.js'
 import { loadIngestors } from '../../ingestors/registry.js'
 import { findIngestor } from '../../ingestors/_utils/dispatch.js'
 import type { Ingestor } from '../../ingestors/interface.js'
+import { ensureDaemonRunning } from './daemon.js'
+import { ingestChronicle } from '../../daemon/api-client.js'
 
 interface IngestStats {
   written: number      // sessions where at least one new part landed
@@ -78,20 +79,19 @@ export async function runIngest(positional: string | undefined, _rest: string[])
 
   console.log(`\nIngesting ${matches.length} file(s)${dryRun ? ' (dry-run — nothing will be written)' : ''}…`)
 
-  let vault: Awaited<ReturnType<typeof buildVault>> | null = null
-  if (!dryRun) {
-    vault = await buildVault()
-    await vault.startup()
-  }
+  // Non-dry-run: every chronicle is shipped to the running daemon via
+  // `POST /api/hooks/ingest_chronicle`. No local vault built — single source
+  // of truth stays in the daemon's memory.
+  if (!dryRun) await ensureDaemonRunning()
 
   const stats: IngestStats = { written: 0, duplicates: 0, errors: 0 }
 
-  const runOne = async (file: string, ingestor: Ingestor): Promise<void> => {
+  for (const { file, ingestor } of matches) {
     try {
       const sessions = await ingestor.parse(file)
       if (sessions.length === 0) {
         console.log(`  skip ${displayName(file)} (no content after filtering)`)
-        return
+        continue
       }
       for (const s of sessions) {
         if (dryRun) {
@@ -100,7 +100,12 @@ export async function runIngest(positional: string | undefined, _rest: string[])
           continue
         }
         const tags = [...(s.tags ?? []), ...userTags]
-        const r = await vault!.ingest(s.chronicleId, s.mementos, { tags, createdAt: s.createdAt })
+        const r = await ingestChronicle({
+          chronicle_id: s.chronicleId,
+          mementos: s.mementos,
+          tags,
+          createdAt: s.createdAt,
+        })
         if (r.added > 0) {
           console.log(`  ${displayName(file)} → chronicle ${s.chronicleId}: +${r.added} new, ${r.skipped} already present`)
           stats.written++
@@ -115,20 +120,6 @@ export async function runIngest(positional: string | undefined, _rest: string[])
     }
   }
 
-  // Batch ingest is one logical write — hold the lock ONCE for the whole loop
-  // rather than acquire/release per session. Thousands of acquire/release cycles
-  // would otherwise create a race window where a concurrent process (e.g. an
-  // active MCP server) could steal the lock between cycles, ECOMPROMISED-crash
-  // the watchdog, and tear down the ingest mid-batch.
-  if (vault && !dryRun) {
-    await vault.writeLock.run(async () => {
-      for (const { file, ingestor } of matches) await runOne(file, ingestor)
-    })
-  } else {
-    for (const { file, ingestor } of matches) await runOne(file, ingestor)
-  }
-
-  if (vault) await vault.close()
   console.log(
     `\nDone. sessions_written=${stats.written} all_already_present=${stats.duplicates} errors=${stats.errors}`,
   )

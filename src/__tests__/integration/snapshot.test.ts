@@ -20,6 +20,21 @@ import { setupTestEnv, runInitWithFlags, ProcessExitError, type IntegrationConte
 import { decryptMemMeta } from '../../core/vault/aad.js'
 import { deriveKeyFromEntropy } from '../../keys/_utils/derivation/index.js'
 import type { MemFile, MemMeta } from '../../core/vault/types.js'
+import type { Vault } from '../../core/vault/index.js'
+
+// Snapshot now POSTs to the daemon's /api/hooks/ingest_chronicle. In tests
+// we don't start a daemon — we mock the api-client + ensureDaemonRunning so
+// the POST is short-circuited into a direct `vault.ingest` call against a
+// vault built in-process. The test still verifies snapshot's parse → ingest
+// pipeline end-to-end, just without the network hop.
+vi.mock('../../daemon/api-client.js', async () => {
+  const actual = await vi.importActual<typeof import('../../daemon/api-client.js')>('../../daemon/api-client.js')
+  return { ...actual, ingestChronicle: vi.fn() }
+})
+vi.mock('../../cli/commands/daemon.js', async () => {
+  const actual = await vi.importActual<typeof import('../../cli/commands/daemon.js')>('../../cli/commands/daemon.js')
+  return { ...actual, ensureDaemonRunning: vi.fn().mockResolvedValue(undefined) }
+})
 
 describe('mementos snapshot', () => {
   let ctx: IntegrationContext
@@ -31,12 +46,23 @@ describe('mementos snapshot', () => {
     return decryptMemMeta(mem, key)
   }
 
+  let vault: Vault | null = null
+
   beforeEach(async () => {
     ctx = await setupTestEnv()
     await runInitWithFlags([
       '--backend=local', '--embedder=minilm', '--index=hnsw',
       '--key=env', '--integrations=none',
     ])
+    // Build a real in-process vault to back the mocked ingestChronicle —
+    // snapshot's POST is shorted to vault.ingest, .mem files are real.
+    const { buildVault } = await import('../../cli/_utils/vault.js')
+    vault = await buildVault()
+    await vault.startup()
+    const { ingestChronicle } = await import('../../daemon/api-client.js')
+    vi.mocked(ingestChronicle).mockImplementation(async ({ chronicle_id, mementos, tags, createdAt }) => {
+      return vault!.ingest(chronicle_id, mementos, { tags, createdAt })
+    })
     // Silence log output from snapshot to keep test output readable.
     vi.spyOn(console, 'log').mockImplementation(() => {})
     vi.spyOn(console, 'error').mockImplementation(() => {})
@@ -44,6 +70,7 @@ describe('mementos snapshot', () => {
 
   afterEach(async () => {
     vi.restoreAllMocks()
+    if (vault) { await vault.close(); vault = null }
     await ctx.cleanup()
   })
 

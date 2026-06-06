@@ -1,8 +1,16 @@
 # CLI + MCP reference
 
-Two surfaces, one binary. The **CLI** is what humans type at the terminal (`mementos init`, `mementos list`, `mementos doctor`, …). The **MCP server** is what AI clients call (`recall`, `write_memento`, `search`, …) — started by `mementos serve`, never run by hand.
+Mementos is built on a **single persistent daemon** (`mementos start`) that holds the vault in memory and exposes a plain HTTP API on `127.0.0.1:47899`. Every other piece — the MCP server AI clients launch, the CLI commands you type, the snapshot/ingest hook subprocesses — is a thin client that POSTs to the daemon. **Exactly one vault in memory across the machine.**
 
-The CLI dispatcher is [src/cli/index.ts](index.ts); subcommand handlers live under [src/cli/commands/](commands/). The MCP server is one `registerTool` per `Vault` method, defined in [src/core/mcp.ts](../core/mcp.ts).
+- **`mementos start`** runs the daemon (and `mementos stop` shuts it down).
+- **`mementos mcp`** is a stdio MCP shim AI clients register; it forwards every MCP tool call to the daemon over plain HTTP.
+- **CLI commands** (`mementos recall`, `mementos write`, etc.) also POST to the daemon; they error with a clear "Run `mementos start` first" if no daemon is listening.
+
+The CLI dispatcher is [src/cli/index.ts](index.ts); subcommand handlers live under [src/cli/commands/](commands/). The tool registry (descriptions, schemas, daemon-side implementations) is one file: [src/core/tools.ts](../core/tools.ts).
+
+## Auth
+
+Every HTTP request requires `Authorization: Bearer <token>`. The daemon generates a fresh 256-bit token at startup, writes it to `~/.config/mementos/daemon.token` with `0600` perms, and deletes it on shutdown. Clients (CLI, MCP shim, hooks) read the file before each request. Other local users on the machine can't read the token file and so can't talk to the daemon — `127.0.0.1` binding rejects external network, the token rejects everything else.
 
 ---
 
@@ -15,8 +23,14 @@ mementos init [--mode=new|join] [--reinit] [--full]
                                 # a vault that exists elsewhere; --full pre-installs every
                                 # optional backend and warms the MiniLM embedding model
 
-# Day-to-day
-mementos serve                  # start the MCP server (run by the AI client, not by hand)
+# Daemon lifecycle
+mementos start [--foreground]   # start the daemon (default: detach into background;
+                                # `--foreground` keeps stdio for debugging).
+                                # Generates ~/.config/mementos/daemon.token (0600) and
+                                # binds 127.0.0.1:47899 (override with MEMENTOS_PORT).
+mementos stop                   # SIGTERM the daemon via PID file
+mementos mcp                    # stdio MCP shim AI clients launch via `claude mcp add`.
+                                # Auto-starts the daemon if not running.
 
 # Recall + write (mirror the MCP tools — shell-capable AI clients can invoke
 # these directly when MCP is opted out at install time)
@@ -136,7 +150,7 @@ This makes the lifecycle robust:
 - **Resume** — re-run `mementos migrate`; it picks up where it crashed (the stage step is idempotent).
 - **Abort** — `mementos migrate --abort`. During staging this just discards the staging directory — the live vault was never touched. During the brief commit it restores from the backup.
 - A **typed new key** is entered twice and must match (a mistyped, unrecoverable mnemonic would otherwise be silent data loss), and the pre-migration vault is kept as a backup.
-- `migrate` refuses while a `mementos serve` server is running and syncs the source first.
+- `migrate` refuses while the daemon (`mementos start`) is running and syncs the source first.
 
 `mementos backup [dir]` / `mementos restore <dir>` export the vault to a plain directory of encrypted files and import it back — a manual safety copy independent of migrations.
 

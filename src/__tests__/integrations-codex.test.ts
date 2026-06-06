@@ -65,7 +65,7 @@ describe('CodexIntegration', () => {
     await new CodexIntegration().install()
 
     const add = mockExecCalls.find(a => a[0] === 'mcp' && a[1] === 'add')
-    expect(add).toEqual(['mcp', 'add', 'mementos', '--', 'mementos', 'serve'])
+    expect(add).toEqual(['mcp', 'add', 'mementos', '--', 'mementos', 'mcp'])
 
     const skill = await readFile(join(skillDir(), 'SKILL.md'), 'utf8')
     expect(skill.startsWith('---\nname: mementos\n')).toBe(true)

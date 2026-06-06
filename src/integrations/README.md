@@ -63,9 +63,9 @@ Two short-lived hook subprocesses + one long-lived server:
 
 - **`mementos session-start`** — opt-in, fires once at conversation start. Emits the curated memory-index memento under a `[MEMORY-INDEX]` prelude so the AI knows what's in the vault without having to call `recall` first. Used by `claude-code` (`SessionStart`, matcher `startup|resume`) and `codex` (`SessionStart`).
 - **`mementos snapshot`** — opt-in, fires before context compaction. Ingests the in-progress transcript into the vault so a long conversation doesn't get lost when the client compacts. Used by `claude-code` only (`PreCompact`, matcher `auto`).
-- **MCP server → `mementos serve`** — long-lived, started by the AI client. Provides all the MCP tools (`recall`, `write_memento`, `search`, …) over MCP stdio. When MCP mode is off, the AI invokes the equivalent CLI commands (`mementos recall "..."`, etc.) directly via its shell tool.
+- **MCP server → `mementos mcp`** — stdio MCP shim AI clients register via `claude mcp add ... mementos mcp`. The shim forwards every tool call (`recall`, `write_memento`, `search`, …) to the running daemon (`mementos start`) over plain HTTP. Auto-starts the daemon if not already up — AI clients don't see startup latency. When MCP mode is off, the AI invokes the equivalent CLI commands (`mementos recall "..."`, etc.) via its shell tool — those hit the SAME daemon over the SAME HTTP API, so both paths share one vault. (`mementos serve` is a back-compat alias of `mementos mcp` for one minor version.)
 
-Hook commands carry no secrets — both subprocesses read the vault key from the OS keychain themselves. The per-prompt auto-retrieve hook was retired (the skill + session-start prelude cover the same UX without burning tokens on trivial turns).
+Both hook subprocesses also auto-start the daemon. The daemon is **the** vault on this machine; no subprocess builds its own copy. Hook commands carry no secrets — they read the bearer token from `~/.config/mementos/daemon.token` (which the daemon writes `0600` at startup). The per-prompt auto-retrieve hook was retired (the skill + session-start prelude cover the same UX without burning tokens on trivial turns).
 
 ## Shared helpers
 
