@@ -35,7 +35,7 @@ import { z } from 'zod'
 import type { Vault } from '../core/vault/index.js'
 import { activeTools, type ToolDef } from '../core/tools.js'
 import { tokensMatch } from './token.js'
-import { daemonHost, daemonPort } from './endpoint.js'
+import { DAEMON_HOST, DAEMON_PORT } from './constants.js'
 export interface HttpApiServer {
   /** Stop accepting new connections; resolve once the OS releases the port. */
   close(): Promise<void>
@@ -59,9 +59,7 @@ interface StartOpts {
 }
 
 export async function startHttpApi(vault: Vault, opts: StartOpts): Promise<HttpApiServer> {
-  const host = daemonHost()
-  const port = daemonPort()
-  await assertPortFree(host, port)
+  await assertPortFree(DAEMON_HOST, DAEMON_PORT)
 
   const tools = activeTools({ searchEnabled: opts.searchEnabled })
   const version = packageVersion()
@@ -80,7 +78,7 @@ export async function startHttpApi(vault: Vault, opts: StartOpts): Promise<HttpA
 
   await new Promise<void>((resolve, reject) => {
     server.once('error', reject)
-    server.listen(port, host, () => {
+    server.listen(DAEMON_PORT, DAEMON_HOST, () => {
       server.removeListener('error', reject)
       resolve()
     })

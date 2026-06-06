@@ -16,7 +16,7 @@ import { buildVault } from '../cli/_utils/vault.js'
 import { registerServe } from '../cli/_utils/serve-registry.js'
 import { readMachineConfig } from '../core/config.js'
 import { startHttpApi } from './http-api.js'
-import { pidFilePath } from './endpoint.js'
+import { DAEMON_PID_FILE } from './constants.js'
 import { generateAndWriteToken, deleteToken } from './token.js'
 
 export async function runDaemon(): Promise<void> {
@@ -38,9 +38,8 @@ export async function runDaemon(): Promise<void> {
   // Marks this process so `mementos migrate` refuses while it's alive.
   await registerServe()
 
-  const pidPath = pidFilePath()
-  await mkdir(dirname(pidPath), { recursive: true }).catch(() => { /* fine */ })
-  await writeFile(pidPath, String(process.pid), 'utf8')
+  await mkdir(dirname(DAEMON_PID_FILE), { recursive: true }).catch(() => { /* fine */ })
+  await writeFile(DAEMON_PID_FILE, String(process.pid), 'utf8')
 
   // Auth token: generated once per daemon lifetime, written `0600` to the
   // shared file every client reads from.
@@ -62,7 +61,7 @@ export async function runDaemon(): Promise<void> {
         .catch(() => { /* fail-soft on shutdown */ })
         .finally(async () => {
           await deleteToken()
-          await unlink(pidPath).catch(() => { /* already gone */ })
+          await unlink(DAEMON_PID_FILE).catch(() => { /* already gone */ })
           resolve()
         })
     }

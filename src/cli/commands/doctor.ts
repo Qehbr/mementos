@@ -31,8 +31,7 @@ import { MEM_EXTENSION } from '../../core/vault/constants.js'
 import { requireImpl, buildKeyProvider, buildStorageBackend, buildStorageAndKey } from '../_utils/vault.js'
 import { readManifest } from '../_utils/migration-manifest.js'
 import { isDaemonRunning } from '../../daemon/api-client.js'
-import { daemonUrl } from '../../daemon/endpoint.js'
-import { tokenFilePath } from '../../daemon/token.js'
+import { DAEMON_URL, DAEMON_TOKEN_FILE } from '../../daemon/constants.js'
 import type { MachineConfig, VaultConfig } from '../../core/types.js'
 import type { MemFile } from '../../core/vault/types.js'
 
@@ -305,25 +304,24 @@ async function checkDaemon(): Promise<CheckResult> {
   // Verify the token file is present + has the expected `0600` perms — without
   // it, clients (CLI, shim, hooks) get a clean 401 from the daemon and the user
   // would otherwise see a confusing "unauthorized" error from `mementos recall`.
-  const tokenPath = tokenFilePath()
   try {
-    const s = await stat(tokenPath)
+    const s = await stat(DAEMON_TOKEN_FILE)
     const mode = s.mode & 0o777
     if (process.platform !== 'win32' && mode !== 0o600) {
       return {
         name: 'Daemon', status: 'fail',
-        detail: `running at ${daemonUrl()} but token file has unsafe perms (${mode.toString(8)})`,
-        hint: `fix:  chmod 600 ${tokenPath}   (or restart the daemon: \`mementos stop && mementos start\`)`,
+        detail: `running at ${DAEMON_URL} but token file has unsafe perms (${mode.toString(8)})`,
+        hint: `fix:  chmod 600 ${DAEMON_TOKEN_FILE}   (or restart the daemon: \`mementos stop && mementos start\`)`,
       }
     }
   } catch {
     return {
       name: 'Daemon', status: 'fail',
-      detail: `running at ${daemonUrl()} but token file missing at ${tokenPath}`,
+      detail: `running at ${DAEMON_URL} but token file missing at ${DAEMON_TOKEN_FILE}`,
       hint: 'restart: `mementos stop && mementos start`',
     }
   }
-  return { name: 'Daemon', status: 'ok', detail: `running at ${daemonUrl()} (token OK)` }
+  return { name: 'Daemon', status: 'ok', detail: `running at ${DAEMON_URL} (token OK)` }
 }
 
 async function checkIntegrations(): Promise<CheckResult[]> {

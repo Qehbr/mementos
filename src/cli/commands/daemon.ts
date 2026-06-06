@@ -2,7 +2,7 @@
  * `mementos start` / `mementos stop` — the persistent daemon that holds the
  * vault in memory for the lifetime of multiple sessions.
  *
- *   `start`        → bind the HTTP MCP port (`127.0.0.1:11434` by default),
+ *   `start`        → bind the HTTP API port (`127.0.0.1:47899` by default),
  *                    hold the vault, exit on SIGTERM. `--foreground` keeps
  *                    stdio attached for debugging; otherwise double-fork
  *                    into the background.
@@ -22,12 +22,9 @@ import { dirname, resolve as resolvePath } from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
 import { runDaemon } from '../../daemon/runner.js'
 import { isDaemonRunning } from '../../daemon/api-client.js'
-import { pidFilePath, daemonUrl } from '../../daemon/endpoint.js'
+import { DAEMON_PID_FILE, DAEMON_URL, AUTOSTART_TIMEOUT_MS, AUTOSTART_POLL_INTERVAL_MS } from '../../daemon/constants.js'
 import { parseFlag } from '../_utils/flags.js'
 
-/** Time we'll wait for a freshly-spawned daemon to bind its socket before giving up. */
-const AUTOSTART_TIMEOUT_MS = 5_000
-const AUTOSTART_POLL_INTERVAL_MS = 50
 
 /**
  * `mementos start [--foreground]` — run the daemon. Without `--foreground`,
@@ -36,7 +33,7 @@ const AUTOSTART_POLL_INTERVAL_MS = 50
  */
 export async function runStart(): Promise<void> {
   if (await isDaemonRunning()) {
-    console.error(`mementos daemon already running at ${daemonUrl()}.`)
+    console.error(`mementos daemon already running at ${DAEMON_URL}.`)
     process.exit(1)
   }
 
@@ -68,7 +65,7 @@ export async function runStart(): Promise<void> {
     console.error('  Run `mementos start --foreground` to see the startup error.')
     process.exit(1)
   }
-  console.log(`mementos daemon started (at ${daemonUrl()}).`)
+  console.log(`mementos daemon started (at ${DAEMON_URL}).`)
 }
 
 /**
@@ -79,7 +76,7 @@ export async function runStart(): Promise<void> {
 export async function runStop(): Promise<void> {
   let pid: number
   try {
-    pid = Number((await readFile(pidFilePath(), 'utf8')).trim())
+    pid = Number((await readFile(DAEMON_PID_FILE, 'utf8')).trim())
   } catch (e) {
     if ((e as NodeJS.ErrnoException).code === 'ENOENT') {
       console.error('mementos stop: no daemon running (no PID file).')
@@ -88,7 +85,7 @@ export async function runStop(): Promise<void> {
     throw e
   }
   if (!Number.isInteger(pid) || pid <= 0) {
-    console.error(`mementos stop: malformed PID file at ${pidFilePath()}.`)
+    console.error(`mementos stop: malformed PID file at ${DAEMON_PID_FILE}.`)
     process.exit(1)
   }
 
@@ -162,5 +159,5 @@ async function waitForDaemon(timeoutMs: number): Promise<boolean> {
 
 // Used by `mementos stop` to verify the PID file references the right thing.
 export async function pidFileExists(): Promise<boolean> {
-  try { await stat(pidFilePath()); return true } catch { return false }
+  try { await stat(DAEMON_PID_FILE); return true } catch { return false }
 }

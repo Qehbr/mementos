@@ -12,38 +12,32 @@
  * owning Unix user can talk to the daemon, even though the port is bound to
  * `127.0.0.1` (which alone would let any local user POST).
  *
- * **Future hosted mode** (multi-user server): same shape, different storage
- * — per-user tokens issued at sign-in, persisted in a real auth store. The
- * Authorization-header validation code stays identical.
+ * The daemon is **local-only by architectural commitment** (see
+ * `daemon/endpoint.ts`) — there is no hosted/multi-user mode in mementos.
+ * Per-user token issuance, OAuth flows, and the rest of that machinery don't
+ * apply here.
  */
 import { writeFile, readFile, unlink, mkdir } from 'node:fs/promises'
-import { join, dirname } from 'node:path'
+import { dirname } from 'node:path'
 import { randomBytes } from 'node:crypto'
-import { homedir } from 'node:os'
-
-const TOKEN_BYTES = 32  // 256 bits
-
-export function tokenFilePath(): string {
-  return join(homedir(), '.config', 'mementos', 'daemon.token')
-}
+import { DAEMON_TOKEN_FILE, TOKEN_BYTES } from './constants.js'
 
 /** Generate, write `0600`, return the new token. Used by `mementos start`. */
 export async function generateAndWriteToken(): Promise<string> {
-  const path = tokenFilePath()
-  await mkdir(dirname(path), { recursive: true }).catch(() => { /* parent may exist */ })
+  await mkdir(dirname(DAEMON_TOKEN_FILE), { recursive: true }).catch(() => { /* parent may exist */ })
   const token = randomBytes(TOKEN_BYTES).toString('hex')
-  await writeFile(path, token, { encoding: 'utf8', mode: 0o600 })
+  await writeFile(DAEMON_TOKEN_FILE, token, { encoding: 'utf8', mode: 0o600 })
   return token
 }
 
 /** Read the token file. Throws if missing — clients use that to detect "no daemon". */
 export async function readToken(): Promise<string> {
-  return (await readFile(tokenFilePath(), 'utf8')).trim()
+  return (await readFile(DAEMON_TOKEN_FILE, 'utf8')).trim()
 }
 
 /** Remove the token file. Daemon calls on graceful shutdown. */
 export async function deleteToken(): Promise<void> {
-  await unlink(tokenFilePath()).catch(() => { /* already gone — fine */ })
+  await unlink(DAEMON_TOKEN_FILE).catch(() => { /* already gone — fine */ })
 }
 
 /**

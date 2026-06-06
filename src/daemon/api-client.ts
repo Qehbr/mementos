@@ -16,7 +16,7 @@
  * mode just changes the URL.
  */
 import { createConnection } from 'node:net'
-import { daemonHost, daemonPort, daemonUrl } from './endpoint.js'
+import { DAEMON_HOST, DAEMON_PORT, DAEMON_URL } from './constants.js'
 import { readToken } from './token.js'
 
 export class DaemonUnavailableError extends Error {
@@ -30,7 +30,7 @@ export class DaemonApiError extends Error {
 /** Quick TCP-connect probe. No HTTP roundtrip — used for liveness checks. */
 export async function isDaemonRunning(): Promise<boolean> {
   return new Promise<boolean>(resolve => {
-    const probe = createConnection({ host: daemonHost(), port: daemonPort() })
+    const probe = createConnection({ host: DAEMON_HOST, port: DAEMON_PORT })
     probe.once('connect', () => { probe.destroy(); resolve(true) })
     probe.once('error', () => resolve(false))
   })
@@ -79,7 +79,7 @@ async function fetchJson(method: 'GET' | 'POST', path: string, body?: Record<str
   try { token = await readToken() }
   catch { throw new DaemonUnavailableError('no daemon token (start it with `mementos start`)') }
 
-  const url = daemonUrl() + path
+  const url = DAEMON_URL + path
   const res = await fetch(url, {
     method,
     headers: {
