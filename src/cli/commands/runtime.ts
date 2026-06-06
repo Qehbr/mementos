@@ -13,7 +13,7 @@
  * spawning a daemon they didn't ask for. (Hooks and the `mementos mcp` shim
  * auto-start — they run automatically and can't ask the user.)
  *
- * Tool-name → CLI-command map mirrors `src/core/mcp.ts`:
+ * Tool-name → CLI-command map mirrors `src/core/tools.ts`:
  *
  *   recall       → recall, write_memento → write, update_memento → update,
  *   get_tags     → tags, get_memento → get, delete_memento → delete,

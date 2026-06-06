@@ -5,7 +5,7 @@
  * The Vault is the domain layer: its read methods return data (`RecallResult[]`, …), never
  * formatted strings. Everything that turns that data into human/AI-facing text lives here,
  * so retrieval logic and output formatting never entangle and a format change lands in one
- * place. Shared by `core/mcp.ts` (the MCP tools) and `cli/runtime.ts` (the hook + CLI).
+ * place. Shared by `core/tools.ts` (the daemon's tool handlers) and the snapshot/session-start hooks.
  */
 import type {
   RecallResult, MementoSummary, MementoDetail, ChronicleEntry,

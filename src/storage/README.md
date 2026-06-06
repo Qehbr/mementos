@@ -38,7 +38,7 @@ A memento is **one file**, regardless of length. Long text is split into chunks,
 
 `updateMemento` reads the file's etag and writes with `{ ifMatch: etag }`. The Vault's per-machine lock only serialises writers on *this* machine; a sync client, text editor, or `git pull` can still touch the file mid-update. `assertIfMatch` re-`get`s the file at write time and rejects if anything changed — `Vault` translates the rejection into `StaleMementoError`, surfacing the conflict instead of a silent overwrite.
 
-The MD5 etag is **opt-in via `{ etag: true }`** — callers that discard it (the warm-startup load path, doctor probe, init key probe, migrate scan) save one MD5-over-file-body per call. At 100k mementos that drops a meaningful fraction of every `mementos serve` launch's startup time.
+The MD5 etag is **opt-in via `{ etag: true }`** — callers that discard it (the warm-startup load path, doctor probe, init key probe, migrate scan) save one MD5-over-file-body per call. At 100k mementos that drops a meaningful fraction of every `mementos start` daemon-startup time.
 
 ## Cloud sync without git
 
