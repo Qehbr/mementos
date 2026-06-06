@@ -731,18 +731,22 @@ export class Vault {
   // ─── Update ───────────────────────────────────────────────────────────────
 
   /**
-   * Replace a memento's text. Re-chunks, re-embeds, and rewrites the one `.mem` file.
-   * Optimistic concurrency via the file's etag — a concurrent change throws
-   * `StaleMementoError` and the caller should re-read and re-apply. Tags and the
-   * chronicle/parent fields are preserved.
+   * Replace a memento's text and (optionally) its tags. Re-chunks, re-embeds, and
+   * rewrites the one `.mem` file. Optimistic concurrency via the file's etag — a
+   * concurrent change throws `StaleMementoError` and the caller should re-read
+   * and re-apply. `created_at`, `chronicle_id`, `parent_memento_id` are always
+   * preserved.
+   *
+   * `tags`: omit to keep the existing tag set; pass an array to replace them
+   * wholesale (pass `[]` to clear all tags).
    */
-  async updateMemento(id: string, text: string): Promise<WriteOutcome> {
+  async updateMemento(id: string, text: string, tags?: string[]): Promise<WriteOutcome> {
     validateId(id)
     await this.syncIfStale()
-    return this.writeLock.run(() => this.doUpdateMemento(id, text))
+    return this.writeLock.run(() => this.doUpdateMemento(id, text, tags))
   }
 
-  private async doUpdateMemento(id: string, text: string): Promise<WriteOutcome> {
+  private async doUpdateMemento(id: string, text: string, tags?: string[]): Promise<WriteOutcome> {
     const current = await this.readMemento(id)
     if (!current) throw new Error(`Cannot update — memento not found: ${id}`)
     const { meta: oldMeta, etag } = current
@@ -754,9 +758,15 @@ export class Vault {
     const vectors = await this.deps.embedder.embedBatch(texts)
     const chunks = buildChunks(texts, vectors)
 
-    // Preserve created_at / chronicle / parent / tags; bump updated_at — an edit makes
-    // the memento "active" now even if it was created long ago.
-    const meta: MemMeta = { ...oldMeta, updated_at: new Date().toISOString() }
+    // Preserve created_at / chronicle / parent; bump updated_at — an edit makes
+    // the memento "active" now even if it was created long ago. Tags are kept by
+    // default; an explicit `tags` arg replaces the set wholesale (allowing
+    // `tags=[]` to clear them all).
+    const meta: MemMeta = {
+      ...oldMeta,
+      updated_at: new Date().toISOString(),
+      ...(tags !== undefined ? { tags } : {}),
+    }
     const updated = this.encodeMemFile(id, chunks, meta)
 
     let mtimeMs: number

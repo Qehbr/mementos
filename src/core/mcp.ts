@@ -141,18 +141,19 @@ export function createMcpServer(
   server.registerTool(
     'update_memento',
     {
-      description: 'Replace the text of an existing memento by id. Tags and id are preserved; only the text changes.',
+      description: 'Replace the text of an existing memento by id, and optionally replace its tags. The id is preserved.',
       inputSchema: {
         memento_id: z.string().describe('Memento id to update (from the id= field in recall or list output)'),
         text: z.string().describe('The new full text for the memento'),
+        tags: z.array(z.string()).optional().describe('When provided, replaces the memento\'s tags wholesale. Omit to keep the existing tags; pass [] to clear all tags.'),
       },
-      // Idempotent: same (id, text) applied twice is a no-op on the second call
+      // Idempotent: same (id, text, tags) applied twice is a no-op on the second call
       // (etag matches, content matches). Mutates state, so not readOnly.
       annotations: { idempotentHint: true },
     },
-    async ({ memento_id, text }) => {
+    async ({ memento_id, text, tags }) => {
       try {
-        return { content: [{ type: 'text', text: renderUpdate(await vault.updateMemento(memento_id, text)) }] }
+        return { content: [{ type: 'text', text: renderUpdate(await vault.updateMemento(memento_id, text, tags)) }] }
       } catch (e) {
         // A stale-write conflict is an expected, recoverable outcome — return its
         // instructive message as normal content so the AI reads it and retries.
@@ -238,7 +239,7 @@ export function createMcpServer(
   server.registerTool(
     'delete_memento',
     {
-      description: 'Delete a memento from the vault by id. Prefer update_memento to revise an existing memento — update keeps the same id (so references stay valid), preserves tags, and detects concurrent edits.',
+      description: 'Delete a memento from the vault by id. Prefer update_memento to revise an existing memento — it keeps the same id (so references stay valid) and can revise both the text and tags.',
       inputSchema: {
         memento_id: z.string().describe('Memento id to delete'),
       },

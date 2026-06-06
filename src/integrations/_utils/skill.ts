@@ -142,7 +142,7 @@ edited it first. Call get_memento again, re-apply your change to the current tex
 - \`write_memento(text, tags?)\` — store a new memento
 - \`recall(query, k?, tags?, exclude_tags?, chronicle_id?)\` — semantic search, optionally scoped by tags (include / exclude) or chronicle
 - \`search(query, k?, regex?, ignore_case?, context_chars?, tags?, exclude_tags?, chronicle_id?)\` — exact-text / regex search returning match snippets; present only when deep search is enabled
-- \`update_memento(memento_id, text)\` — replace a memento's text
+- \`update_memento(memento_id, text, tags?)\` — replace a memento's text and optionally its tags (omit tags to keep them, pass [] to clear)
 - \`get_memento(memento_id)\` — fetch the full text of one memento
 - \`delete_memento(memento_id)\` — delete one memento
 - \`get_chronicle(chronicle_id)\` — read a whole past conversation in order

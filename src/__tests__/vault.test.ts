@@ -265,6 +265,53 @@ describe('updateMemento', () => {
     expect(result).not.toContain('old specific phrase')
   })
 
+  it('preserves existing tags when the tags argument is omitted', async () => {
+    // Default semantics: text-only update leaves the tag set untouched.
+    const id = idOf(await vault.writeMemento({ text: 'with tags', tags: ['preference', 'project:foo'] }))
+    await vault.updateMemento(id, 'updated text')
+    const tags = (await vault.getMemento(id))!.tags
+    expect(tags).toEqual(['preference', 'project:foo'])
+  })
+
+  it('replaces tags wholesale when a tags array is passed', async () => {
+    // Update can revise both axes at once — text AND tags.
+    const id = idOf(await vault.writeMemento({ text: 'original', tags: ['old-a', 'old-b'] }))
+    await vault.updateMemento(id, 'revised', ['new-a', 'new-b', 'new-c'])
+    const tags = (await vault.getMemento(id))!.tags
+    expect(tags).toEqual(['new-a', 'new-b', 'new-c'])
+  })
+
+  it('clears all tags when an empty array is passed', async () => {
+    // Empty array is distinct from "omitted" — explicit instruction to drop every tag.
+    const id = idOf(await vault.writeMemento({ text: 'tagged', tags: ['drop-me'] }))
+    await vault.updateMemento(id, 'same text', [])
+    const tags = (await vault.getMemento(id))!.tags
+    expect(tags).toEqual([])
+  })
+
+  it('the tag index reflects the new tag set after replacement', async () => {
+    // Edited tags must update getTags()/recall(tags=…) — not just the file on disk.
+    const id = idOf(await vault.writeMemento({ text: 'edit-tags', tags: ['stale-tag'] }))
+    await vault.updateMemento(id, 'edit-tags', ['fresh-tag'])
+    const tags = (await vault.getTags()).map(t => t.tag)
+    expect(tags).not.toContain('stale-tag')
+    expect(tags).toContain('fresh-tag')
+    void id
+  })
+
+  it('tag-filtered recall sees the new tag and not the old after an update', async () => {
+    // Exercise the recall() filter path — the inverted-index update must reach
+    // the filtered-search route too, not just the getTags() listing.
+    const id = idOf(await vault.writeMemento({ text: 'unique-filter-content', tags: ['filter-old'] }))
+    await vault.updateMemento(id, 'unique-filter-content', ['filter-new'])
+
+    const found = await vault.recall('unique-filter-content', 5, undefined, ['filter-new'])
+    expect(found.map(r => r.id)).toContain(id)
+
+    const empty = await vault.recall('unique-filter-content', 5, undefined, ['filter-old'])
+    expect(empty.map(r => r.id)).not.toContain(id)
+  })
+
   it('rejects updateMemento when the .mem file changed externally between read and write', async () => {
     const id = idOf(await vault.writeMemento({ text: 'original text' }))
 
