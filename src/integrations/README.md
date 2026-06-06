@@ -9,7 +9,23 @@ interface ClientIntegration {
   uninstall(): Promise<void>        // remove everything we installed (idempotent)
   isInstalled(): Promise<boolean>   // is mementos currently registered with this client?
   isClientPresent(): Promise<boolean>   // heuristic: does the client appear to exist?
-  readonly hooks?: HookSurface      // optional: shell-command hooks around AI events
+  readonly mcp?: BinarySurface      // optional: per-component MCP-server toggle
+  readonly skill?: BinarySurface    // optional: per-component skill toggle
+  readonly hooks?: HookSurface      // optional: registry of shell-command hooks
+}
+
+// Single `install / uninstall / isInstalled` shape used by skill, MCP, and each hook kind.
+interface BinarySurface {
+  isInstalled(): Promise<boolean>
+  install(): Promise<void>
+  uninstall(): Promise<void>
+}
+
+// HookSurface is a registry of BinarySurfaces, one per hook kind.
+interface HookSurface {
+  supportedHooks(): readonly string[]
+  hook(kind: string): BinarySurface       // throws on unknown kinds
+  disableAllHooks(): Promise<void>        // batched uninstall — the clean-slate
 }
 ```
 
@@ -19,16 +35,16 @@ Adding a new integration is one folder under `src/integrations/<name>/` — see 
 
 | | What it wires up |
 |---|---|
-| **`claude-code`** | MCP server (`~/.claude.json` via `claude mcp add --scope user`) + skill at `~/.claude/skills/mementos.md` + opt-in hooks (`auto-retrieve` / `pre-compact`) in `~/.claude/settings.json` |
-| **`codex`** | MCP server (via `codex mcp add`) + skill at `~/.agents/skills/mementos/SKILL.md` + opt-in `auto-retrieve` hook in `~/.codex/hooks.json` |
-| **`antigravity-cli`** | Plugin bundle at `~/.gemini/config/plugins/mementos/` (`plugin.json` with MCP + hooks, `skills/mementos/SKILL.md`) + entry in `~/.gemini/config/import_manifest.json` |
+| **`claude-code`** | MCP server (`~/.claude.json` via `claude mcp add --scope user`) + skill at `~/.claude/skills/mementos/SKILL.md` (per-folder, with YAML frontmatter) + opt-in hooks (`session-start` / `pre-compact`) in `~/.claude/settings.json` |
+| **`codex`** | MCP server (via `codex mcp add`) + skill at `~/.agents/skills/mementos/SKILL.md` + opt-in `session-start` hook in `~/.codex/hooks.json` |
+| **`antigravity-cli`** | Plugin bundle at `~/.gemini/config/plugins/mementos/` (`plugin.json` with MCP, `skills/mementos/SKILL.md`) + entry in `~/.gemini/config/import_manifest.json`. No hooks — Antigravity has no session-lifecycle event. |
 | **`openclaw`** | MCP server (via `openclaw mcp set`) + skill at `<state>/workspace/skills/mementos/SKILL.md` |
 | **`opencode`** | MCP server (direct JSON edit of `~/.config/opencode/opencode.json`) + skill at `~/.config/opencode/skills/mementos/SKILL.md` |
 | **`claude-desktop`** | MCP server entry only — `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS), `~/.config/Claude/claude_desktop_config.json` (Linux), `%APPDATA%\Claude\claude_desktop_config.json` (Windows) |
 | **`cursor`** | MCP server entry only — `~/.cursor/mcp.json` |
-| **`antigravity`** (IDE) | MCP server entry only — `~/.gemini/antigravity/mcp_config.json` (separate product from the Antigravity CLI) |
+| **`antigravity`** (IDE) | MCP server entry only — `~/.gemini/config/mcp_config.json` (the shared MCP config for Antigravity 2.0, IDE, and CLI; separate product from the Antigravity CLI plugin integration) |
 
-Hooks are always opt-in (`mementos integration hook enable <name>`); the default everywhere is AI-driven `recall`, guided by the skill file — works identically for every MCP-compatible client with no per-message token cost.
+MCP, skill, and hooks are each independently toggleable in `setupAtInit` (via `promptBinaryToggle` driving the integration's `mcp` / `skill` / `hooks.hook(kind)` `BinarySurface`s). Skill defaults Yes (foundational); MCP defaults to the current state; hooks vary per-kind (session-start defaults Yes, pre-compact No). Picking No to MCP puts the integration in **CLI mode** — the AI invokes `mementos recall "..."`, `mementos write "..."`, etc. via its shell tool instead of MCP. Works on every shell-capable client (Claude Code, Codex, Antigravity CLI, OpenCode).
 
 ## What `mementos init` does
 
@@ -37,26 +53,31 @@ Interactive by default — every choice has a sensible default you accept with E
 - **`~/.config/mementos/config.json`** — per-device: `vaultPath`, `backend`, `vectorIndex`, `retriever`, `searcher`, `keyProvider`, plus the backend's `backendConfig` blob (e.g. `{ remote, sshKeyPath? }` for git). Outside the vault directory so it never pollutes `git status` or lands in a shared repo.
 - **`<vaultPath>/vault.json`** — per-vault: `embedder`. Written **through the storage backend** (so `GitBackend` commits + pushes it) — it travels with the vault to every device.
 
-Flags skip prompts for CI/scripting: `--backend=`, `--embedder=`, `--index=`, `--retriever=`, `--searcher=`, `--key=`, `--integrations=`, `--git-remote=`, `--git-ssh-key=generate|<path>|inherit`, `--mode=new|join`. Per-integration skill/hook toggles use the integration's name: `--claude-code-skill=on|off`, `--claude-code-hook-auto-retrieve=on|off`, etc. — one flag per (integration, hook-kind) pair.
+Flags skip prompts for CI/scripting: `--backend=`, `--embedder=`, `--index=`, `--retriever=`, `--searcher=`, `--key=`, `--integrations=`, `--git-remote=`, `--git-ssh-key=generate|<path>|inherit`, `--mode=new|join`. Per-integration component toggles use the integration's name: `--claude-code-mcp=on|off`, `--claude-code-skill=on|off`, `--claude-code-hook-session-start=on|off`, etc. — one flag per (integration, component) pair.
 
 Running `init` on an already-initialised machine **refuses** (pointing at `mementos integration enable` / `mementos integration hook enable`); `--reinit` re-runs anyway, and even then the vault key is **never** regenerated.
 
-## Hook vs MCP server
+## Hooks vs MCP server
 
-- **Hook → `mementos retrieve`** — opt-in, short-lived. Fires once per user message via the client's hook mechanism, injects relevant mementos, exits. Used by `claude-code` (`UserPromptSubmit`), `codex` (`UserPromptSubmit`), `antigravity-cli` (`BeforeAgent`).
-- **MCP server → `mementos serve`** — long-lived, started by the AI client. Provides all the MCP tools (`recall`, `write_memento`, `search`, …) over MCP stdio.
+Two short-lived hook subprocesses + one long-lived server:
 
-The hook command carries no secrets — `mementos retrieve` reads the vault key from the OS keychain itself.
+- **`mementos session-start`** — opt-in, fires once at conversation start. Emits the curated memory-index memento under a `[MEMORY-INDEX]` prelude so the AI knows what's in the vault without having to call `recall` first. Used by `claude-code` (`SessionStart`, matcher `startup|resume`) and `codex` (`SessionStart`).
+- **`mementos snapshot`** — opt-in, fires before context compaction. Ingests the in-progress transcript into the vault so a long conversation doesn't get lost when the client compacts. Used by `claude-code` only (`PreCompact`, matcher `auto`).
+- **MCP server → `mementos serve`** — long-lived, started by the AI client. Provides all the MCP tools (`recall`, `write_memento`, `search`, …) over MCP stdio. When MCP mode is off, the AI invokes the equivalent CLI commands (`mementos recall "..."`, etc.) directly via its shell tool.
+
+Hook commands carry no secrets — both subprocesses read the vault key from the OS keychain themselves. The per-prompt auto-retrieve hook was retired (the skill + session-start prelude cover the same UX without burning tokens on trivial turns).
 
 ## Shared helpers
 
 The `_utils/` folder centralises the shapes every integration uses:
 
+- `promptBinaryToggle` — single prompt helper that drives any `BinarySurface` (skill, MCP, per-hook). Replaces the per-component prompt helpers that existed before unification.
+- `hookToggleMessages(label, integration, kind)` — returns the consistent `"<label> on/off. Disable later with: mementos integration hook (en|dis)able <integration> --type=<kind>"` pair for hook toggles. Pass straight into `promptBinaryToggle`.
 - `jsonMcpConfigOps` — install/uninstall/isInstalled against a JSON config with an MCP-server map (used by claude-desktop / cursor / opencode / antigravity IDE).
 - `standardJsonIntegration` — wraps `jsonMcpConfigOps` into a full `ClientIntegration` for MCP-only-JSON clients.
-- `HookRegistry` + `jsonHooksAdapter` — hook lifecycle for the `event → groups → hooks → command` config shape every hook-bearing integration uses.
+- `HookRegistry` + `jsonHooksAdapter` — hook lifecycle for the `event → groups → hooks → command` config shape every hook-bearing integration uses. Implements `HookSurface` so `hook(kind)` returns a ready-to-use `BinarySurface`.
 - `writeSkillFile` + `SKILL_BODY` / `SKILL_MD` — skill content (one source of truth across every integration).
-- `withInstallShell` — the standard `try { install + prompt } catch { skip }` shape for `setupAtInit`.
+- `withInstallShell` — the standard `try { install + prompt } catch { skip }` shape for `setupAtInit`. Used by `defaultSetupAtInit` for the GUI-only integrations that have no per-component toggles.
 - `cliRunner` + `probeCli` — talking to a client's own CLI.
 - `readJsonConfig` / `writeJsonConfig` — atomic JSON read/write with the malformed-file-refuse rule.
 

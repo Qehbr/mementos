@@ -17,8 +17,25 @@ mementos init [--mode=new|join] [--reinit] [--full]
 
 # Day-to-day
 mementos serve                  # start the MCP server (run by the AI client, not by hand)
-mementos list [tag...]          # list stored mementos, optionally filtered by tag
-mementos get <id>               # print the full decrypted text of a memento
+
+# Recall + write (mirror the MCP tools — shell-capable AI clients can invoke
+# these directly when MCP is opted out at install time)
+mementos recall <query> [--k=N] [--tags=a,b] [--exclude-tags=a,b] [--chronicle=id]
+                                # semantic search for relevant mementos
+mementos write <text> [--tags=a,b]
+                                # store a new memento (text via positional or piped stdin)
+mementos update <id> <text> [--tags=a,b]
+                                # replace a memento's text (id + un-passed tags preserved)
+mementos tags                   # list every tag with its usage count
+
+# Read paths
+mementos list [tag...] [--tags=a,b] [--start=YYYY-MM-DD] [--end=...] [--query=...] [--k=N]
+                                # list mementos by recency, optionally by date range / query
+mementos get <id>               # print the full decrypted text of one memento
+mementos chronicle <id>         # read every memento of one chronicle in order
+mementos chronicles             # list every chronicle with memento count + start time
+mementos index [<text>]         # read the curated memory-index memento, or replace its
+                                # body when text is given (positional or piped stdin)
 mementos delete <id>            # delete a memento
 mementos search <query>         # exact / regex text search (needs --searcher=scan|trigram)
 mementos sync                   # pull the latest mementos from storage now
@@ -42,7 +59,7 @@ mementos uninstall              # (alias: destroy) interactive cleanup — run b
 mementos integration list
 mementos integration enable <name>
 mementos integration disable <name>
-mementos integration hook enable|disable|status <name> [--type=auto-retrieve|pre-compact]
+mementos integration hook enable|disable|status <name> [--type=session-start|pre-compact]
 ```
 
 `mementos --help` prints the full reference; `mementos doctor` is the dependency-ordered health check (machine config → vault path → key → storage → vault config → decrypt probe → embedder → index cache → integrations), short-circuiting cleanly on prereq failure.
@@ -54,7 +71,7 @@ mementos integration hook enable|disable|status <name> [--type=auto-retrieve|pre
 The tools any MCP-compatible AI can call. Vocabulary: a **memento** is one memory, a **chronicle** is an imported conversation.
 
 ### `write_memento(text, tags?)`
-Store a new memento. Long text is chunked internally — still one file. If a near-identical memento exists (cosine distance < 0.08), the call is rejected with a pointer to `update_memento`. Returns `Stored memento (id=…)`.
+Store a new memento. Long text is chunked internally — still one file. If a near-identical memento exists (cosine distance < 0.08), the call is rejected with a pointer to `update_memento`. Returns `Stored memento (id=…)`. Read-only annotations: `idempotentHint: false`.
 
 ### `recall(query, k?, tags?, exclude_tags?, chronicle_id?)`
 Semantic search. Embeds the query, retrieves top-k, collapses chunk hits to mementos, and returns the best-matching chunk of each:
@@ -80,11 +97,11 @@ Registered only when a searcher is configured (`--searcher=scan|trigram` — not
 ### `get_memento(memento_id)`
 The full text of one memento (all chunks joined). `recall` shows only the best chunk of a long memento — call this for the whole thing.
 
-### `update_memento(memento_id, text)`
-Replace a memento's text. Re-chunks and re-embeds, rewrites the one file. If the file changed since you last read it (another device synced, a concurrent agent), the update is rejected and you're told to re-read it and re-apply — first writer wins.
+### `update_memento(memento_id, text, tags?)`
+Replace a memento's text (re-chunked + re-embedded) and optionally its tags. `tags` omitted = keep the existing tag set; `tags=[]` clears all tags; `tags=[...]` replaces wholesale. The id is always preserved. If the file changed since you last read it (another device synced, a concurrent agent), the update is rejected and you're told to re-read it and re-apply — first writer wins.
 
 ### `delete_memento(memento_id)`
-Delete one memento (its single file).
+Delete one memento (its single file). Prefer `update_memento` to revise — that path keeps the same id (so references stay valid) and detects concurrent edits. Annotations: `destructiveHint: true`, `idempotentHint: false`.
 
 ### `get_chronicle(chronicle_id)`
 Every memento of one imported conversation, in order; forks (edited / re-rolled turns) annotated inline.
@@ -95,11 +112,11 @@ Every imported conversation, with its memento count and start time.
 ### `get_tags()`
 All tags in use, with counts. The AI is told to call this before tagging, to reuse tags rather than invent near-duplicates.
 
-### `get_recent_mementos(limit?)`
-The most recently **active** mementos, newest first — ranked by `updated_at`, so a memento edited today sorts above one written yesterday and never touched. Session bootstrap.
+### `list_mementos(start?, end?, query?, k?)`
+Mementos in reverse-chronological order by `updated_at`, optionally bounded by a date window and/or ranked by a semantic query. With no params: the k most-recently-touched mementos overall (session bootstrap). With `start`/`end`: "what did we work on last week?" — an old memento edited inside the window is in range. With `query`: results are ranked by semantic relevance instead of recency.
 
-### `get_mementos_in_range(start?, end?, query?, k?)`
-Mementos whose `updated_at` falls in a date window — so an old memento edited inside the window is in range. With `query`, ranked by relevance. "What did I touch last Tuesday?"
+### `get_memory_index()` / `update_memory_index(text)`
+The vault keeps ONE curated summary memento — a hand-curated top-level view of what's worth knowing. The session-start hook loads its body once per conversation under a `[MEMORY-INDEX]` heading; `get_memory_index` re-reads it on demand and `update_memory_index(text)` revises it. There is only one index memento; its id is resolved internally — no need to track it.
 
 ### `sync()`
 Pull the latest mementos from storage immediately, instead of waiting for the ~10-minute auto-sync. The AI is told to use this only when you insist a memory exists but `recall` came up empty — it may have been written on another device.
