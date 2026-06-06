@@ -87,7 +87,7 @@ export function createMcpServer(
   server.registerTool(
     'recall',
     {
-      description: 'Semantically search the vault for mementos relevant to a query. Call proactively at conversation start if no memories were auto-injected, or when you need context about a specific topic. Optionally filter by tags to scope the search; use exclude_tags to drop categories you do not want (e.g. exclude_tags=["source:claude-code"] for "things I wrote directly, not bulk-imported chat history"). A long memento shows only its best-matching chunk — call get_memento for the full text.',
+      description: 'Semantically search the vault for mementos relevant to a query. Call proactively at conversation start to surface relevant context, or when you need context about a specific topic. Optionally filter by tags to scope the search; use exclude_tags to drop categories you do not want (e.g. exclude_tags=["source:claude-code"] for "things I wrote directly, not bulk-imported chat history"). A long memento shows only its best-matching chunk — call get_memento for the full text.',
       inputSchema: {
         query: z.string().describe('Natural language query — what context are you looking for?'),
         k: z.number().int().positive().max(MAX_RECALL_K).default(DEFAULT_RECALL_K).describe(`Max mementos to return (default ${DEFAULT_RECALL_K}, max ${MAX_RECALL_K})`),

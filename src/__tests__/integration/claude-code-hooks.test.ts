@@ -1,6 +1,8 @@
 /**
- * Hook plumbing for ClaudeCodeIntegration — three kinds today: auto-retrieve,
- * session-start, and pre-compact.
+ * Hook plumbing for ClaudeCodeIntegration — two kinds today: session-start
+ * and pre-compact. (The per-prompt auto-retrieve hook was retired because the
+ * skill + session-start prelude cover the same UX without burning tokens on
+ * trivial turns.)
  *
  * We exercise the class directly (no `claude mcp` subprocess, no init flow). Each hook
  * lives in `~/.claude/settings.json` under its Claude-Code-side event name; this test
@@ -12,7 +14,7 @@ import { readFile, mkdir } from 'node:fs/promises'
 import { join } from 'node:path'
 import { setupTestEnv, type IntegrationContext } from './_helpers.js'
 
-describe('ClaudeCodeIntegration hooks (auto-retrieve + session-start + pre-compact)', () => {
+describe('ClaudeCodeIntegration hooks (session-start + pre-compact)', () => {
   let ctx: IntegrationContext
 
   beforeEach(async () => {
@@ -27,20 +29,6 @@ describe('ClaudeCodeIntegration hooks (auto-retrieve + session-start + pre-compa
     return JSON.parse(raw)
   }
 
-  it('enableHook(auto-retrieve) writes a UserPromptSubmit entry with `mementos retrieve`', async () => {
-    const { ClaudeCodeIntegration } = await import('../../integrations/claude-code/index.js')
-    const integ = new ClaudeCodeIntegration()
-    await integ.hooks.enableHook('auto-retrieve')
-
-    const settings = await readSettings()
-    const hooks = settings.hooks as Record<string, Array<{ hooks?: Array<{ command?: string }> }>>
-    expect(hooks.UserPromptSubmit).toBeDefined()
-    expect(hooks.UserPromptSubmit[0].hooks?.[0].command).toBe('mementos retrieve')
-    expect(hooks.PreCompact).toBeUndefined()
-    expect(await integ.hooks.isHookEnabled('auto-retrieve')).toBe(true)
-    expect(await integ.hooks.isHookEnabled('pre-compact')).toBe(false)
-  })
-
   it('enableHook(session-start) writes a SessionStart entry with `mementos session-start`', async () => {
     const { ClaudeCodeIntegration } = await import('../../integrations/claude-code/index.js')
     const integ = new ClaudeCodeIntegration()
@@ -50,6 +38,7 @@ describe('ClaudeCodeIntegration hooks (auto-retrieve + session-start + pre-compa
     const hooks = settings.hooks as Record<string, Array<{ hooks?: Array<{ command?: string }> }>>
     expect(hooks.SessionStart).toBeDefined()
     expect(hooks.SessionStart[0].hooks?.[0].command).toBe('mementos session-start')
+    // The retired UserPromptSubmit (auto-retrieve) event must never reappear.
     expect(hooks.UserPromptSubmit).toBeUndefined()
     expect(hooks.PreCompact).toBeUndefined()
     expect(await integ.hooks.isHookEnabled('session-start')).toBe(true)
@@ -65,27 +54,27 @@ describe('ClaudeCodeIntegration hooks (auto-retrieve + session-start + pre-compa
     expect(hooks.PreCompact).toBeDefined()
     expect(hooks.PreCompact[0].hooks?.[0].command).toBe('mementos snapshot')
     expect(hooks.UserPromptSubmit).toBeUndefined()
+    expect(hooks.SessionStart).toBeUndefined()
     expect(await integ.hooks.isHookEnabled('pre-compact')).toBe(true)
-    expect(await integ.hooks.isHookEnabled('auto-retrieve')).toBe(false)
   })
 
   it('both hooks coexist; each disable only touches its own event', async () => {
     const { ClaudeCodeIntegration } = await import('../../integrations/claude-code/index.js')
     const integ = new ClaudeCodeIntegration()
-    await integ.hooks.enableHook('auto-retrieve')
+    await integ.hooks.enableHook('session-start')
     await integ.hooks.enableHook('pre-compact')
 
     let settings = await readSettings()
     let hooks = settings.hooks as Record<string, unknown[]>
-    expect(hooks.UserPromptSubmit).toBeDefined()
+    expect(hooks.SessionStart).toBeDefined()
     expect(hooks.PreCompact).toBeDefined()
 
     await integ.hooks.disableHook('pre-compact')
     settings = await readSettings()
     hooks = settings.hooks as Record<string, unknown[]>
-    expect(hooks.UserPromptSubmit).toBeDefined()
+    expect(hooks.SessionStart).toBeDefined()
     expect((hooks.PreCompact as unknown[] | undefined)?.length ?? 0).toBe(0)
-    expect(await integ.hooks.isHookEnabled('auto-retrieve')).toBe(true)
+    expect(await integ.hooks.isHookEnabled('session-start')).toBe(true)
     expect(await integ.hooks.isHookEnabled('pre-compact')).toBe(false)
   })
 
@@ -103,17 +92,17 @@ describe('ClaudeCodeIntegration hooks (auto-retrieve + session-start + pre-compa
   it('disableHook(both kinds in turn) ends up with both events empty', async () => {
     const { ClaudeCodeIntegration } = await import('../../integrations/claude-code/index.js')
     const integ = new ClaudeCodeIntegration()
-    await integ.hooks.enableHook('auto-retrieve')
+    await integ.hooks.enableHook('session-start')
     await integ.hooks.enableHook('pre-compact')
 
-    await integ.hooks.disableHook('auto-retrieve')
+    await integ.hooks.disableHook('session-start')
     await integ.hooks.disableHook('pre-compact')
 
     const settings = await readSettings()
     const hooks = settings.hooks as Record<string, Array<unknown> | undefined>
-    expect((hooks?.UserPromptSubmit ?? []).length).toBe(0)
+    expect((hooks?.SessionStart ?? []).length).toBe(0)
     expect((hooks?.PreCompact ?? []).length).toBe(0)
-    expect(await integ.hooks.isHookEnabled('auto-retrieve')).toBe(false)
+    expect(await integ.hooks.isHookEnabled('session-start')).toBe(false)
     expect(await integ.hooks.isHookEnabled('pre-compact')).toBe(false)
   })
 })

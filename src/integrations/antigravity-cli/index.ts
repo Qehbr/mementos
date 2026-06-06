@@ -8,44 +8,25 @@
  * as keys INSIDE plugin.json. Our integration writes:
  *
  *   ~/.gemini/config/plugins/mementos/
- *     plugin.json                          (name + version + mcpServers + hooks)
+ *     plugin.json                          (name + version + mcpServers)
  *     skills/mementos/SKILL.md             (the AI-facing skill, with YAML frontmatter)
  *   ~/.gemini/config/import_manifest.json  (entry so `agy plugin list` shows us)
  *
- * The `PreInvocation` event fires before each user message reaches the agent — it's
- * Antigravity's canonical pre-prompt lifecycle hook. Verified by inspecting the
- * agy 1.0.2 binary: only `PreInvocation`/`PostInvocation`/`PreToolUse`/`PostToolUse`/
- * `Stop` are registered as agent-lifecycle hook events. (Antigravity CLI superseded
- * Gemini CLI; the older `BeforeAgent`/`SessionStart` event names from Gemini CLI no
- * longer exist.) The pre-1.0.2 integration shipped `BeforeAgent` which validated
- * but never fired — a real bug.
- *
- * Antigravity has no session-lifecycle event, so the Claude-Code-style "load the
- * memory index once at conversation start" UX is not available here; users get
- * auto-retrieve (per-prompt) only.
- *
- * The hook command is plain `mementos retrieve` — same as Claude Code and Codex.
- * Antigravity's PreInvocation handler may expect a JSON envelope
- * (`{ hookSpecificOutput: { hookEventName, additionalContext } }`, the shape
- * Gemini CLI documented). We can't verify against `agy --print` without OAuth,
- * so until a real user reports that auto-injection works (or doesn't), we ship
- * plain text and accept that the auto-retrieve hook may be a no-op for
- * Antigravity. The MCP server's `recall` tool is the load-bearing path
- * regardless — users get explicit retrieval there.
+ * No hooks: Antigravity has no session-lifecycle event (only Pre/PostInvocation /
+ * Pre/PostToolUse / Stop — verified by inspecting the agy 1.0.2 binary), and we dropped
+ * the per-prompt auto-retrieve hook everywhere because it injected noise and ate tokens.
+ * Users get the MCP server + the skill — the AI calls `recall()` explicitly when context
+ * is needed, guided by the skill body.
  */
 import { rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { homedir } from 'node:os'
 import { pathExists } from '../../core/_utils/fs.js'
 import type { ClientIntegration } from '../interface.js'
-import { mcpServerEntry, AUTO_RETRIEVE_COMMAND } from '../interface.js'
+import { mcpServerEntry } from '../interface.js'
 import type { IntegrationImplementationModule } from '../registry.js'
-import type { InitContext } from '../../core/init-context/interface.js'
-import { promptAutoRetrieveHook } from '../_utils/prompt.js'
-import { StepCounter } from '../../cli/_utils/prompts.js'
+import { defaultSetupAtInit } from '../_utils/default-setup.js'
 import { SKILL_MD, writeSkillFile } from '../_utils/skill.js'
-import { HookRegistry, jsonHooksAdapter, type HookSpec, type HookConfigAdapter } from '../_utils/hook-registry.js'
-import { withInstallShell } from '../_utils/install-shell.js'
 import { readJsonConfig, writeJsonConfig } from '../_utils/json-config.js'
 
 // ─── Discovery contract ───────────────────────────────────────────────────────
@@ -53,8 +34,7 @@ export const type = 'antigravity-cli'
 export function create(): ClientIntegration {
   return new AntigravityCliIntegration()
 }
-/** Module-level setupAtInit delegates into the class so install helpers can stay private. */
-export const setupAtInit = (ctx: InitContext) => new AntigravityCliIntegration().setupAtInit(ctx)
+export const setupAtInit = defaultSetupAtInit(create)
 const _shape: IntegrationImplementationModule = { type, create, setupAtInit }
 
 interface ImportManifestEntry {
@@ -72,7 +52,6 @@ interface PluginManifest {
   version: string
   description?: string
   mcpServers?: Record<string, unknown>
-  hooks?: Record<string, unknown>
 }
 
 const PLUGIN_NAME = 'mementos'
@@ -129,35 +108,18 @@ export class AntigravityCliIntegration implements ClientIntegration {
   }
 
   /**
-   * Init-time flow. Install if not already installed, then prompt for the auto-retrieval
-   * hook (default = current state). `--antigravity-cli-hook-auto-retrieve=on|off` skips the prompt.
-   */
-  async setupAtInit(ctx: InitContext): Promise<void> {
-    await withInstallShell(
-      { name: this.name, install: () => this.install(), isInstalled: () => this.isInstalled() },
-      ctx,
-      async () => {
-        // Antigravity has only PreInvocation — no session-start equivalent.
-        // One prompt total.
-        const steps = new StepCounter(1)
-        await promptAutoRetrieveHook(ctx, this, type,
-          'Enable Antigravity CLI auto-retrieval hook? (pre-injects memories before every message; costs tokens on trivial turns)', steps)
-      },
-    )
-  }
-
-  /**
-   * Write plugin.json with MCP server and our metadata, preserving any existing `hooks`
-   * key (so a re-install doesn't wipe a hook the user/AI toggled previously).
+   * Write plugin.json with the MCP server entry and our metadata. Reads the
+   * existing file first so a malformed JSON (typo, partial write) fails loud
+   * instead of being silently overwritten — same defensive posture as every
+   * other config-touching path.
    */
   private async writePluginManifest(): Promise<void> {
-    const existing = await readJsonConfig<Partial<PluginManifest>>(this.pluginManifestPath, {})
+    await readJsonConfig<Partial<PluginManifest>>(this.pluginManifestPath, {})
     const manifest: PluginManifest = {
       name: PLUGIN_NAME,
       version: PLUGIN_VERSION,
       description: PLUGIN_DESCRIPTION,
       mcpServers: { [PLUGIN_NAME]: mcpServerEntry() },
-      ...(existing.hooks ? { hooks: existing.hooks } : {}),
     }
     await writeJsonConfig(this.pluginManifestPath, manifest)
   }
@@ -185,51 +147,5 @@ export class AntigravityCliIntegration implements ClientIntegration {
     const manifest = await readJsonConfig<ImportManifest>(this.importManifestPath, {})
     const imports = (manifest.imports ?? []).filter(e => e.name !== PLUGIN_NAME)
     await writeJsonConfig(this.importManifestPath, { ...manifest, imports })
-  }
-
-  // ─── Hook lifecycle ──────────────────────────────────────────────────────────
-
-  /**
-   * Antigravity supports only `PreInvocation` for per-prompt context injection.
-   * Hook command is the plain `mementos retrieve` — runtime emits plain text,
-   * same as for Claude Code / Codex. See the file-level docstring for the
-   * envelope-shape caveat.
-   */
-  private static readonly HOOKS = {
-    'auto-retrieve': {
-      event: 'PreInvocation',
-      command: AUTO_RETRIEVE_COMMAND,
-      baseCommand: AUTO_RETRIEVE_COMMAND,
-    },
-  } as const satisfies Record<string, HookSpec>
-
-  /**
-   * HookRegistry edits the `hooks` key of plugin.json directly. The adapter wraps
-   * `jsonHooksAdapter` so that a hook toggle on a not-yet-installed integration produces
-   * a valid plugin.json (with name/version) rather than a `{ hooks: {…} }` orphan.
-   */
-  readonly hooks = new HookRegistry(
-    AntigravityCliIntegration.HOOKS,
-    this.pluginHooksAdapter(),
-    this.name,
-  )
-
-  private pluginHooksAdapter(): HookConfigAdapter {
-    const base = jsonHooksAdapter(
-      () => this.pluginManifestPath,
-      // The `name` field is the per-hook identifier inside one event's hook array.
-      // Derive it from `baseCommand` so the kind ("retrieve" / "session-start") flows
-      // through automatically — no per-kind switch to maintain.
-      spec => ({ matcher: '*', hooks: [{ name: spec.baseCommand.replace(/\s+/g, '-'), type: 'command', command: spec.command }] }),
-    )
-    return {
-      ...base,
-      read: async () => {
-        const raw = await base.read()
-        if (typeof raw['name'] !== 'string') raw['name'] = PLUGIN_NAME
-        if (typeof raw['version'] !== 'string') raw['version'] = PLUGIN_VERSION
-        return raw
-      },
-    }
   }
 }

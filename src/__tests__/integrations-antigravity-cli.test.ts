@@ -123,101 +123,12 @@ describe('AntigravityCliIntegration', () => {
     expect(await integ.isClientPresent()).toBe(true)
   })
 
-  // ─── Hooks ────────────────────────────────────────────────────────────────
-  // Antigravity 1.0.2 supports only PreInvocation for context injection — verified
-  // by grepping the agy binary. `BeforeAgent` (Gemini CLI legacy) and `SessionStart`
-  // (Claude-Code-style) are not registered hook event names.
-  it('supportedHooks reports auto-retrieve only (no SessionStart equivalent in Antigravity)', async () => {
+  // No hook lifecycle: Antigravity ships MCP + skill only. Antigravity has no
+  // session-lifecycle event, and the per-prompt auto-retrieve hook was dropped
+  // across all integrations.
+  it('exposes no hook surface', async () => {
     const { AntigravityCliIntegration } = await import('../integrations/antigravity-cli/index.js')
-    expect(new AntigravityCliIntegration().hooks.supportedHooks()).toEqual(['auto-retrieve'])
-  })
-
-  it('enableHook(auto-retrieve) writes a PreInvocation command hook into plugin.json', async () => {
-    const { AntigravityCliIntegration } = await import('../integrations/antigravity-cli/index.js')
-    const integ = new AntigravityCliIntegration()
-    await integ.install()  // base plugin.json must exist first
-
-    expect(await integ.hooks.isHookEnabled('auto-retrieve')).toBe(false)
-    await integ.hooks.enableHook('auto-retrieve')
-    expect(await integ.hooks.isHookEnabled('auto-retrieve')).toBe(true)
-
-    const manifest = JSON.parse(await readFile(pluginManifestPath(), 'utf8')) as {
-      name: string
-      hooks: Record<string, Array<{ matcher: string; hooks: Array<{ type: string; command: string }> }>>
-    }
-    // Hook lives INSIDE plugin.json, not in a separate settings file.
-    expect(manifest.hooks['PreInvocation']).toEqual([
-      {
-        matcher: '*',
-        hooks: [{ name: 'mementos-retrieve', type: 'command', command: 'mementos retrieve' }],
-      },
-    ])
-    // The retired `BeforeAgent` event name must never reappear.
-    expect(manifest.hooks['BeforeAgent']).toBeUndefined()
-    expect(manifest.name).toBe('mementos')  // plugin metadata preserved
-  })
-
-  it('enableHook(session-start) throws — Antigravity has no SessionStart event', async () => {
-    const { AntigravityCliIntegration } = await import('../integrations/antigravity-cli/index.js')
-    const integ = new AntigravityCliIntegration()
-    await integ.install()
-
-    await expect(integ.hooks.enableHook('session-start')).rejects.toThrow(/Unknown hook kind 'session-start'/)
-  })
-
-  it('enableHook on a fresh setup creates a valid plugin.json (name/version present)', async () => {
-    const { AntigravityCliIntegration } = await import('../integrations/antigravity-cli/index.js')
-    // Toggle hook WITHOUT calling install() first — common when `mementos integration hook enable`
-    // is run before / instead of full install. The adapter must defensively inject baseline fields.
-    await new AntigravityCliIntegration().hooks.enableHook('auto-retrieve')
-
-    const manifest = JSON.parse(await readFile(pluginManifestPath(), 'utf8')) as { name?: string; version?: string }
-    expect(manifest.name).toBe('mementos')
-    expect(manifest.version).toBeTruthy()
-  })
-
-  it('enableHook is idempotent — no duplicate entry on second call', async () => {
-    const { AntigravityCliIntegration } = await import('../integrations/antigravity-cli/index.js')
-    const integ = new AntigravityCliIntegration()
-    await integ.install()
-    await integ.hooks.enableHook('auto-retrieve')
-    await integ.hooks.enableHook('auto-retrieve')
-
-    const manifest = JSON.parse(await readFile(pluginManifestPath(), 'utf8')) as { hooks: Record<string, unknown[]> }
-    expect(manifest.hooks['PreInvocation']).toHaveLength(1)
-  })
-
-  it('disableHook removes our entry but preserves other groups under PreInvocation', async () => {
-    const { AntigravityCliIntegration } = await import('../integrations/antigravity-cli/index.js')
-    const integ = new AntigravityCliIntegration()
-    await integ.install()
-
-    // User has a pre-existing hook of their own under the same event.
-    const manifestRaw = JSON.parse(await readFile(pluginManifestPath(), 'utf8')) as Record<string, unknown>
-    manifestRaw['hooks'] = {
-      PreInvocation: [{ matcher: '*', hooks: [{ type: 'command', command: 'my-own-hook' }] }],
-    }
-    await writeFile(pluginManifestPath(), JSON.stringify(manifestRaw), 'utf8')
-
-    await integ.hooks.enableHook('auto-retrieve')
-    await integ.hooks.disableHook('auto-retrieve')
-
-    expect(await integ.hooks.isHookEnabled('auto-retrieve')).toBe(false)
-    const manifest = JSON.parse(await readFile(pluginManifestPath(), 'utf8')) as {
-      hooks: Record<string, Array<{ hooks: Array<{ command: string }> }>>
-    }
-    expect(manifest.hooks['PreInvocation']).toEqual([
-      { matcher: '*', hooks: [{ type: 'command', command: 'my-own-hook' }] },
-    ])
-  })
-
-  it('uninstall strips the hook along with the plugin dir', async () => {
-    const { AntigravityCliIntegration } = await import('../integrations/antigravity-cli/index.js')
-    const integ = new AntigravityCliIntegration()
-    await integ.install()
-    await integ.hooks.enableHook('auto-retrieve')
-    await integ.uninstall()
-    expect(await integ.hooks.isHookEnabled('auto-retrieve')).toBe(false)
+    expect(new AntigravityCliIntegration().hooks).toBeUndefined()
   })
 
   it('refuses to overwrite a malformed plugin.json', async () => {
@@ -225,11 +136,6 @@ describe('AntigravityCliIntegration', () => {
     await mkdir(pluginDir(), { recursive: true })
     await writeFile(pluginManifestPath(), '{ not valid json', 'utf8')
     await expect(new AntigravityCliIntegration().install()).rejects.toThrow(/not valid JSON/)
-  })
-
-  it('enableHook rejects an unknown hook kind', async () => {
-    const { AntigravityCliIntegration } = await import('../integrations/antigravity-cli/index.js')
-    await expect(new AntigravityCliIntegration().hooks.enableHook('pre-compact')).rejects.toThrow(/Unknown hook kind/)
   })
 
   it('discovery contract: type/create/setupAtInit module exports', async () => {

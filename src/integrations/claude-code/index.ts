@@ -1,7 +1,7 @@
 /**
  * ClaudeCodeIntegration — MCP server (via `claude mcp add --scope user` → ~/.claude.json),
- * skill at ~/.claude/skills/mementos/SKILL.md, opt-in UserPromptSubmit + PreCompact hooks
- * in ~/.claude/settings.json. Hooks default OFF (pre-injection burns tokens on trivial turns).
+ * skill at ~/.claude/skills/mementos/SKILL.md, opt-in SessionStart + PreCompact hooks
+ * in ~/.claude/settings.json.
  *
  * Skill layout: per the 2026 Agent-Skills spec
  * (https://code.claude.com/docs/en/skills), every skill is a directory whose
@@ -13,10 +13,10 @@ import { join } from 'node:path'
 import { homedir } from 'node:os'
 import { cliRunner, probeCli } from '../_utils/cli-runner.js'
 import type { ClientIntegration } from '../interface.js'
-import { MCP_SERVER_COMMAND, AUTO_RETRIEVE_COMMAND, SESSION_START_COMMAND } from '../interface.js'
+import { MCP_SERVER_COMMAND, SESSION_START_COMMAND } from '../interface.js'
 import type { IntegrationImplementationModule } from '../registry.js'
 import type { InitContext } from '../../core/init-context/interface.js'
-import { resolveYesNo, promptHookToggle, promptAutoRetrieveHook } from '../_utils/prompt.js'
+import { resolveYesNo, promptHookToggle } from '../_utils/prompt.js'
 import { StepCounter } from '../../cli/_utils/prompts.js'
 import { SKILL_MD, writeSkillFile } from '../_utils/skill.js'
 import { HookRegistry, jsonHooksAdapter, type HookSpec } from '../_utils/hook-registry.js'
@@ -94,9 +94,7 @@ export class ClaudeCodeIntegration implements ClientIntegration {
 
   /** Real toggle — answering No to an enabled hook disables it. */
   private async promptHooks(ctx: InitContext): Promise<void> {
-    const steps = new StepCounter(3)
-    await promptAutoRetrieveHook(ctx, this, type,
-      'Enable auto-retrieval hook? (pre-injects memories before every message; costs tokens on trivial turns)', steps)
+    const steps = new StepCounter(2)
     await promptHookToggle({
       ctx, flag: `${type}-hook-session-start`, label: 'Session-start hook',
       integration: 'claude-code', kind: 'session-start',
@@ -178,7 +176,6 @@ export class ClaudeCodeIntegration implements ClientIntegration {
    * One entry per hook kind. Each spec carries its own `matcher` so the same
    * registry can produce the right Claude Code source-filter per event:
    *
-   *  - `auto-retrieve`  → `UserPromptSubmit`, no source filter (matcher: '')
    *  - `session-start`  → `SessionStart`, only `startup|resume` (skip `/clear`
    *                       and `/compact` source — we don't want to re-load the
    *                       memory index on every conversation reset)
@@ -187,12 +184,6 @@ export class ClaudeCodeIntegration implements ClientIntegration {
    *                       snapshot mid-flow)
    */
   private static readonly HOOKS = {
-    'auto-retrieve': {
-      event: 'UserPromptSubmit',
-      command: AUTO_RETRIEVE_COMMAND,
-      baseCommand: AUTO_RETRIEVE_COMMAND,
-      matcher: '',
-    },
     'session-start': {
       event: 'SessionStart',
       command: SESSION_START_COMMAND,

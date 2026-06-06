@@ -57,42 +57,46 @@ try {
   await integration.install()
   pass('install() is idempotent (second run clean)')
 
-  console.log('\nhook lifecycle (auto-retrieve + session-start → ~/.codex/hooks.json)')
-  const expectedHooks = ['auto-retrieve', 'session-start']
+  console.log('\nhook lifecycle (session-start → ~/.codex/hooks.json)')
+  const expectedHooks = ['session-start']
   if (integration.hooks.supportedHooks().join() !== expectedHooks.join()) {
     fail(`supportedHooks() should be ${JSON.stringify(expectedHooks)}, got ${JSON.stringify(integration.hooks.supportedHooks())}`)
   }
   pass(`supportedHooks() reports ${JSON.stringify(expectedHooks)}`)
 
-  await integration.hooks.enableHook('auto-retrieve')
-  if (!await integration.hooks.isHookEnabled('auto-retrieve')) fail('isHookEnabled() false right after enableHook()')
+  await integration.hooks.enableHook('session-start')
+  if (!await integration.hooks.isHookEnabled('session-start')) fail('isHookEnabled() false right after enableHook()')
   pass('enableHook() registered the hook')
 
   const hooksRaw = await readFile(hooksPath, 'utf8').catch(() => fail(`hooks.json not written at ${hooksPath}`))
   const hooksFile = JSON.parse(hooksRaw) as {
     hooks?: Record<string, Array<{ hooks?: Array<{ type?: string; command?: string }> }>>
   }
-  const handler = hooksFile.hooks?.['UserPromptSubmit']?.[0]?.hooks?.[0]
-  if (handler?.type !== 'command' || handler?.command !== 'mementos retrieve') {
-    fail(`hooks.json UserPromptSubmit entry is wrong:\n${hooksRaw}`)
+  const handler = hooksFile.hooks?.['SessionStart']?.[0]?.hooks?.[0]
+  if (handler?.type !== 'command' || handler?.command !== 'mementos session-start') {
+    fail(`hooks.json SessionStart entry is wrong:\n${hooksRaw}`)
   }
-  pass('hooks.json has a UserPromptSubmit "mementos retrieve" command hook')
+  // The retired UserPromptSubmit event must never reappear in our entries.
+  if (hooksFile.hooks?.['UserPromptSubmit']) {
+    fail(`hooks.json still has a UserPromptSubmit entry — auto-retrieve was retired:\n${hooksRaw}`)
+  }
+  pass('hooks.json has a SessionStart "mementos session-start" command hook')
 
   // The real CLI must still parse its config with our hooks.json present.
   await codex(['mcp', 'list']).catch(e => fail(`'codex mcp list' failed with hooks.json present: ${String(e)}`))
   pass('codex CLI still runs with hooks.json present')
 
-  await integration.hooks.disableHook('auto-retrieve')
-  if (await integration.hooks.isHookEnabled('auto-retrieve')) fail('isHookEnabled() still true after disableHook()')
+  await integration.hooks.disableHook('session-start')
+  if (await integration.hooks.isHookEnabled('session-start')) fail('isHookEnabled() still true after disableHook()')
   pass('disableHook() removed the hook')
 
   console.log('\nuninstall()')
-  await integration.hooks.enableHook('auto-retrieve')
+  await integration.hooks.enableHook('session-start')
   await integration.uninstall()
   if (await integration.isInstalled()) fail('isInstalled() is still true after uninstall()')
   pass('isInstalled() reports false')
 
-  if (await integration.hooks.isHookEnabled('auto-retrieve')) fail('hook still enabled after uninstall()')
+  if (await integration.hooks.isHookEnabled('session-start')) fail('hook still enabled after uninstall()')
   pass('uninstall() stripped the hook')
 
   const listAfterUninstall = await codex(['mcp', 'list']).catch(() => '')

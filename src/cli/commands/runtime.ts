@@ -8,7 +8,7 @@
  */
 import type { Vault } from '../../core/vault/index.js'
 import { createMcpServer } from '../../core/mcp.js'
-import { renderRecall, renderMemento, renderMementoIndex, renderSearch, formatSyncCounts } from '../../core/render.js'
+import { renderMemento, renderMementoIndex, renderSearch, formatSyncCounts } from '../../core/render.js'
 import { buildVault, withVault } from '../_utils/vault.js'
 import { parseFlag } from '../_utils/flags.js'
 import { registerServe } from '../_utils/serve-registry.js'
@@ -88,29 +88,6 @@ export async function runSessionStart(): Promise<void> {
   }
 }
 
-/**
- * Hook entry point. Reads the user's message from stdin, runs one recall, writes results
- * to stdout. Exits silently on any error (debug log only with MEMENTOS_DEBUG) so a broken
- * hook can never interrupt the user's conversation.
- */
-export async function runRetrieve(): Promise<void> {
-  const query = extractQuery(await readStdin())
-  if (!query) return
-
-  let vault: Awaited<ReturnType<typeof buildVault>> | null = null
-  try {
-    vault = await buildVault()
-    await vault.startup()
-    const results = await vault.recall(query, DEFAULT_RECALL_K)
-    if (results.length > 0) process.stdout.write(renderRecall(results) + '\n')
-  } catch (e) {
-    if (process.env['MEMENTOS_DEBUG']) await logRetrieveFailure(e)
-  } finally {
-    // syncIfStale can dirty the cache via doSync's register/unregister even on a thrown
-    // recall — without this flush every failed retrieve subprocess silently drifts.
-    if (vault) await vault.close().catch(() => { /* fail-silent hook */ })
-  }
-}
 
 
 export async function runList(subcommand: string | undefined, args: string[]): Promise<void> {
@@ -211,41 +188,3 @@ export async function runSearch(subcommand: string | undefined, args: string[]):
   })
 }
 
-// ─── retrieve helpers (private — only used by runRetrieve) ───────────────────
-
-function extractQuery(raw: string): string {
-  try {
-    const input = JSON.parse(raw) as Record<string, unknown>
-    if (typeof input['message'] === 'string') return input['message']
-    if (typeof input['prompt'] === 'string') return input['prompt']
-    if (Array.isArray(input['messages'])) {
-      const msgs = input['messages'] as Array<{ role?: string; content?: unknown }>
-      const last = [...msgs].reverse().find(m => m.role === 'user')
-      const c = last?.content
-      return typeof c === 'string' ? c : ''
-    }
-  } catch { /* not JSON — use the raw text */ }
-  return raw.trim()
-}
-
-const MAX_STDIN_CHARS = 1024 * 1024
-
-async function readStdin(): Promise<string> {
-  if (process.stdin.isTTY) return ''
-  return new Promise(resolve => {
-    let data = ''
-    let exceeded = false
-    process.stdin.setEncoding('utf8')
-    process.stdin.on('data', (chunk: string) => {
-      if (exceeded) return
-      if (data.length + chunk.length > MAX_STDIN_CHARS) {
-        exceeded = true
-        data = ''
-        return
-      }
-      data += chunk
-    })
-    process.stdin.on('end', () => resolve(data))
-    process.stdin.on('error', () => resolve(''))
-  })
-}

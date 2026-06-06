@@ -113,54 +113,56 @@ describe('CodexIntegration', () => {
   // ─── Hooks ────────────────────────────────────────────────────────────────
   const hooksPath = () => join(home, '.codex', 'hooks.json')
 
-  it('supportedHooks reports auto-retrieve + session-start (Codex has no compaction event)', async () => {
+  it('supportedHooks reports session-start only (auto-retrieve hook was retired)', async () => {
     const { CodexIntegration } = await import('../integrations/codex/index.js')
-    expect(new CodexIntegration().hooks.supportedHooks()).toEqual(['auto-retrieve', 'session-start'])
+    expect(new CodexIntegration().hooks.supportedHooks()).toEqual(['session-start'])
   })
 
-  it('enableHook writes a UserPromptSubmit command hook to hooks.json', async () => {
+  it('enableHook writes a SessionStart command hook to hooks.json', async () => {
     const { CodexIntegration } = await import('../integrations/codex/index.js')
     const integ = new CodexIntegration()
-    expect(await integ.hooks.isHookEnabled('auto-retrieve')).toBe(false)
+    expect(await integ.hooks.isHookEnabled('session-start')).toBe(false)
 
-    await integ.hooks.enableHook('auto-retrieve')
-    expect(await integ.hooks.isHookEnabled('auto-retrieve')).toBe(true)
+    await integ.hooks.enableHook('session-start')
+    expect(await integ.hooks.isHookEnabled('session-start')).toBe(true)
 
     const file = JSON.parse(await readFile(hooksPath(), 'utf8')) as {
       hooks: Record<string, Array<{ hooks: Array<{ type: string; command: string }> }>>
     }
-    expect(file.hooks['UserPromptSubmit']).toEqual([
-      { hooks: [{ type: 'command', command: 'mementos retrieve' }] },
+    expect(file.hooks['SessionStart']).toEqual([
+      { hooks: [{ type: 'command', command: 'mementos session-start' }] },
     ])
+    // The retired UserPromptSubmit event must never reappear in our entries.
+    expect(file.hooks['UserPromptSubmit']).toBeUndefined()
   })
 
   it('enableHook is idempotent — no duplicate entry on second call', async () => {
     const { CodexIntegration } = await import('../integrations/codex/index.js')
     const integ = new CodexIntegration()
-    await integ.hooks.enableHook('auto-retrieve')
-    await integ.hooks.enableHook('auto-retrieve')
+    await integ.hooks.enableHook('session-start')
+    await integ.hooks.enableHook('session-start')
     const file = JSON.parse(await readFile(hooksPath(), 'utf8')) as {
       hooks: Record<string, unknown[]>
     }
-    expect(file.hooks['UserPromptSubmit']).toHaveLength(1)
+    expect(file.hooks['SessionStart']).toHaveLength(1)
   })
 
   it('disableHook removes our entry but preserves the user\'s own hooks', async () => {
     const { CodexIntegration } = await import('../integrations/codex/index.js')
     await mkdir(join(home, '.codex'), { recursive: true })
     await writeFile(hooksPath(), JSON.stringify({
-      hooks: { UserPromptSubmit: [{ hooks: [{ type: 'command', command: 'my-own-hook' }] }] },
+      hooks: { SessionStart: [{ hooks: [{ type: 'command', command: 'my-own-hook' }] }] },
     }), 'utf8')
 
     const integ = new CodexIntegration()
-    await integ.hooks.enableHook('auto-retrieve')
-    await integ.hooks.disableHook('auto-retrieve')
+    await integ.hooks.enableHook('session-start')
+    await integ.hooks.disableHook('session-start')
 
-    expect(await integ.hooks.isHookEnabled('auto-retrieve')).toBe(false)
+    expect(await integ.hooks.isHookEnabled('session-start')).toBe(false)
     const file = JSON.parse(await readFile(hooksPath(), 'utf8')) as {
       hooks: Record<string, Array<{ hooks: Array<{ command: string }> }>>
     }
-    expect(file.hooks['UserPromptSubmit']).toEqual([
+    expect(file.hooks['SessionStart']).toEqual([
       { hooks: [{ type: 'command', command: 'my-own-hook' }] },
     ])
   })
@@ -169,20 +171,20 @@ describe('CodexIntegration', () => {
     const { CodexIntegration } = await import('../integrations/codex/index.js')
     const integ = new CodexIntegration()
     await integ.install()
-    await integ.hooks.enableHook('auto-retrieve')
+    await integ.hooks.enableHook('session-start')
     await integ.uninstall()
-    expect(await integ.hooks.isHookEnabled('auto-retrieve')).toBe(false)
+    expect(await integ.hooks.isHookEnabled('session-start')).toBe(false)
   })
 
   it('readHooks refuses to overwrite a malformed hooks.json', async () => {
     const { CodexIntegration } = await import('../integrations/codex/index.js')
     await mkdir(join(home, '.codex'), { recursive: true })
     await writeFile(hooksPath(), '{ not valid json', 'utf8')
-    await expect(new CodexIntegration().hooks.enableHook('auto-retrieve')).rejects.toThrow(/not valid JSON/)
+    await expect(new CodexIntegration().hooks.enableHook('session-start')).rejects.toThrow(/not valid JSON/)
   })
 
   it('enableHook rejects an unknown hook kind', async () => {
     const { CodexIntegration } = await import('../integrations/codex/index.js')
-    await expect(new CodexIntegration().hooks.enableHook('pre-compact')).rejects.toThrow(/Unknown hook kind/)
+    await expect(new CodexIntegration().hooks.enableHook('auto-retrieve')).rejects.toThrow(/Unknown hook kind/)
   })
 })

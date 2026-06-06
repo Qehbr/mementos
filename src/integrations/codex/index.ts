@@ -10,10 +10,10 @@ import { homedir } from 'node:os'
 import { cliRunner } from '../_utils/cli-runner.js'
 import { pathExists } from '../../core/_utils/fs.js'
 import type { ClientIntegration } from '../interface.js'
-import { MCP_SERVER_COMMAND, AUTO_RETRIEVE_COMMAND, SESSION_START_COMMAND } from '../interface.js'
+import { MCP_SERVER_COMMAND, SESSION_START_COMMAND } from '../interface.js'
 import type { IntegrationImplementationModule } from '../registry.js'
 import type { InitContext } from '../../core/init-context/interface.js'
-import { promptAutoRetrieveHook, promptHookToggle } from '../_utils/prompt.js'
+import { promptHookToggle } from '../_utils/prompt.js'
 import { StepCounter } from '../../cli/_utils/prompts.js'
 import { SKILL_MD, writeSkillFile } from '../_utils/skill.js'
 import { HookRegistry, jsonHooksAdapter, type HookSpec } from '../_utils/hook-registry.js'
@@ -85,9 +85,7 @@ export class CodexIntegration implements ClientIntegration {
       { name: this.name, install: () => this.install(), isInstalled: () => this.isInstalled() },
       ctx,
       async () => {
-        const steps = new StepCounter(2)
-        await promptAutoRetrieveHook(ctx, this, type,
-          'Enable Codex auto-retrieval hook? (pre-injects memories before every message; costs tokens on trivial turns)', steps)
+        const steps = new StepCounter(1)
         await promptHookToggle({
           ctx, flag: `${type}-hook-session-start`, label: 'Session-start hook',
           integration: type, kind: 'session-start',
@@ -120,11 +118,6 @@ export class CodexIntegration implements ClientIntegration {
    * no compaction hook, so no pre-compact kind. Adding a new kind is one entry here.
    */
   private static readonly HOOKS = {
-    'auto-retrieve': {
-      event: 'UserPromptSubmit',
-      command: AUTO_RETRIEVE_COMMAND,
-      baseCommand: AUTO_RETRIEVE_COMMAND,
-    },
     'session-start': {
       event: 'SessionStart',
       command: SESSION_START_COMMAND,

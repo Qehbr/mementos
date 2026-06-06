@@ -24,14 +24,6 @@
 export const MCP_SERVER_COMMAND = ['mementos', 'serve'] as const
 
 /**
- * Shell command every hook-bearing integration's auto-retrieve hook invokes. Same
- * single-source posture as MCP_SERVER_COMMAND — if the CLI dispatcher's `retrieve`
- * verb is ever renamed (or scoped behind a sub-namespace), every integration's hook
- * picks up the change automatically instead of needing 3 sibling edits in lockstep.
- */
-export const AUTO_RETRIEVE_COMMAND = 'mementos retrieve'
-
-/**
  * Shell command for the SessionStart hook — emits the curated `_index` memento
  * as a one-time-per-conversation prelude (NOT per user message). Separate from
  * `auto-retrieve` to keep the per-message recall path lean.

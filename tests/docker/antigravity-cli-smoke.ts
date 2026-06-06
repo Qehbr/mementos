@@ -79,58 +79,17 @@ try {
   await integration.install()
   pass('install() is idempotent (second run clean)')
 
-  // ─── Hook lifecycle ────────────────────────────────────────────────────────
-  // Antigravity supports only `PreInvocation` (verified by grepping the agy 1.0.2
-  // binary: `BeforeAgent`/`SessionStart` are not registered hook event names).
-  // The pre-1.0.2 integration shipped `BeforeAgent` which validated but never fired.
-  console.log('\nhook lifecycle (auto-retrieve → PreInvocation in plugin.json)')
-  const expectedHooks = ['auto-retrieve']
-  if (integration.hooks.supportedHooks().join() !== expectedHooks.join()) {
-    fail(`supportedHooks() should be ${JSON.stringify(expectedHooks)}, got ${JSON.stringify(integration.hooks.supportedHooks())}`)
-  }
-  pass(`supportedHooks() reports ${JSON.stringify(expectedHooks)}`)
+  // No hook lifecycle here: the Antigravity integration ships MCP + skill only.
+  // Antigravity has no session-lifecycle event (only Pre/PostInvocation +
+  // Pre/PostToolUse + Stop, verified by grepping the agy binary), and we dropped
+  // the per-prompt auto-retrieve hook across all integrations.
 
-  await integration.hooks.enableHook('auto-retrieve')
-  if (!await integration.hooks.isHookEnabled('auto-retrieve')) fail('isHookEnabled() false right after enableHook()')
-  pass('enableHook() registered the hook')
-
-  const afterEnable = JSON.parse(await readFile(pluginManifestPath, 'utf8')) as {
-    name?: string; hooks?: Record<string, Array<{ hooks?: Array<{ type?: string; command?: string }> }>>
-  }
-  const handler = afterEnable.hooks?.['PreInvocation']?.[0]?.hooks?.[0]
-  const expectedCmd = 'mementos retrieve'
-  if (handler?.type !== 'command' || handler?.command !== expectedCmd) {
-    fail(`plugin.json PreInvocation entry is wrong:\n${JSON.stringify(afterEnable, null, 2)}`)
-  }
-  if (afterEnable.hooks?.['BeforeAgent']) {
-    fail(`plugin.json still has a BeforeAgent entry — that event was retired:\n${JSON.stringify(afterEnable, null, 2)}`)
-  }
-  if (afterEnable.name !== 'mementos') fail('enableHook() clobbered the plugin name field')
-  pass(`plugin.json has a PreInvocation "${expectedCmd}" hook (and name preserved)`)
-
-  await agy(['plugin', 'list']).catch(e => fail(`agy CLI failed with our plugin + hook present: ${String(e)}`))
-  pass('agy plugin list still runs with the hook present')
-
-  // `agy plugin validate` on our plugin dir — definitive contract check.
+  // `agy plugin validate` on our plugin dir — definitive schema-level contract check.
   const validateOut = await agy(['plugin', 'validate', pluginDir]).catch(e => fail(`'agy plugin validate' failed: ${String(e)}`))
   if (!validateOut.includes('[ok]')) fail(`'agy plugin validate' did not return ok:\n${validateOut}`)
   pass("'agy plugin validate' accepts our plugin layout")
 
-  await integration.hooks.enableHook('auto-retrieve')
-  const afterDouble = JSON.parse(await readFile(pluginManifestPath, 'utf8')) as {
-    hooks?: Record<string, unknown[]>
-  }
-  if (afterDouble.hooks?.['PreInvocation']?.length !== 1) {
-    fail(`enableHook() not idempotent — got ${JSON.stringify(afterDouble.hooks?.['PreInvocation'])}`)
-  }
-  pass('enableHook() is idempotent (second call leaves one entry)')
-
-  await integration.hooks.disableHook('auto-retrieve')
-  if (await integration.hooks.isHookEnabled('auto-retrieve')) fail('isHookEnabled() still true after disableHook()')
-  pass('disableHook() removed the hook')
-
   console.log('\nuninstall()')
-  await integration.hooks.enableHook('auto-retrieve')
   await integration.uninstall()
   if (await integration.isInstalled()) fail('isInstalled() is still true after uninstall()')
   pass('isInstalled() reports false')
@@ -143,9 +102,6 @@ try {
     fail(`import_manifest.json still has our entry after uninstall:\n${JSON.stringify(importAfter, null, 2)}`)
   }
   pass('import_manifest.json entry removed')
-
-  if (await integration.hooks.isHookEnabled('auto-retrieve')) fail('hook still enabled after uninstall()')
-  pass('uninstall() stripped the hook')
 
   const listAfter = await agy(['plugin', 'list']).catch(() => '')
   if (listAfter.includes('mementos')) fail(`'agy plugin list' still shows mementos after uninstall:\n${listAfter}`)

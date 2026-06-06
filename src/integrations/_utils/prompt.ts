@@ -10,7 +10,6 @@
 import { confirm } from '@inquirer/prompts'
 import { promptTheme } from '../../cli/_utils/style.js'
 import type { InitContext } from '../../core/init-context/interface.js'
-import type { HookSurface } from '../interface.js'
 import type { StepCounter } from '../../cli/_utils/prompts.js'
 
 export async function resolveYesNo(
@@ -67,28 +66,3 @@ export async function promptHookToggle(opts: {
   }
 }
 
-/**
- * The auto-retrieval hook toggle — keyed `auto-retrieve`, flagged `<type>-hook-auto-retrieve`,
- * labelled "Auto-retrieval hook". Shared by every integration that wires the hook; only the
- * prompt sentence varies. (`integration` = `type` here; the kind suffix is intentionally
- * omitted since `auto-retrieve` is the only hook these integrations carry.)
- */
-export async function promptAutoRetrieveHook(
-  ctx: InitContext,
-  self: { hooks: HookSurface },
-  type: string,
-  promptText: string,
-  steps?: StepCounter,
-): Promise<void> {
-  await promptHookToggle({
-    ctx,
-    flag: `${type}-hook-auto-retrieve`,
-    label: 'Auto-retrieval hook',
-    integration: type,
-    current: await self.hooks.isHookEnabled('auto-retrieve'),
-    steps,
-    promptText,
-    enable: () => self.hooks.enableHook('auto-retrieve'),
-    disable: () => self.hooks.disableHook('auto-retrieve'),
-  })
-}

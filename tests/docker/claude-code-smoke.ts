@@ -60,7 +60,7 @@ try {
   if (!skill.includes('recall(')) fail('SKILL.md body missing expected `recall(...)` guidance')
   pass('SKILL.md written with frontmatter at the spec-compliant per-folder path')
 
-  // ── hooks (auto-retrieve, pre-compact) — settings.json edits ─────────────
+  // ── hooks (session-start, pre-compact) — settings.json edits ────────────
   console.log('\nhooks')
   for (const kind of integration.hooks.supportedHooks()) {
     await integration.hooks.enableHook(kind)

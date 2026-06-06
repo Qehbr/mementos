@@ -12,7 +12,7 @@
  * at runtime to find what's available.
  */
 import { runInit } from './commands/init.js'
-import { runServe, runRetrieve, runSessionStart, runList, runGet, runDelete, runSync, runSearch } from './commands/runtime.js'
+import { runServe, runSessionStart, runList, runGet, runDelete, runSync, runSearch } from './commands/runtime.js'
 import { runIntegration } from './commands/admin.js'
 import { runShareKey } from './commands/share-key.js'
 import { runDestroy } from './commands/destroy.js'
@@ -50,7 +50,6 @@ try {
   switch (command) {
     case 'init':        await runInit(); break
     case 'serve':       await runServe(); break
-    case 'retrieve':    await runRetrieve(); break
     case 'session-start': await runSessionStart(); break
     case 'list':        await runList(subcommand, args); break
     case 'get':         await runGet(subcommand); break
@@ -233,9 +232,10 @@ Usage:
                                                prereq failure. Exit code 0 if all OK,
                                                1 if any check failed — scriptable.
 
-  (Internal: \`mementos retrieve\` and \`mementos snapshot\` are hook subprocesses
-   invoked by AI clients. \`retrieve\` fires before each user message (auto-retrieve);
-   \`snapshot\` fires before context compaction (pre-compact). Enable each via
-   \`mementos integration hook enable <name> --type=auto-retrieve\` or \`--type=pre-compact\`.)
+  (Internal: \`mementos session-start\` and \`mementos snapshot\` are hook subprocesses
+   invoked by AI clients. \`session-start\` fires once per conversation (loads the
+   curated memory index); \`snapshot\` fires before context compaction (pre-compact).
+   Enable each via \`mementos integration hook enable <name> --type=session-start\`
+   or \`--type=pre-compact\`.)
 `)
 }
