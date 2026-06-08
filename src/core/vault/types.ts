@@ -64,7 +64,7 @@ export interface MemChunk {
  *     moment for ingested content; fixed for the memento's lifetime.
  *   - `updated_at` — when the memento's text was last replaced (ISO 8601). Equals
  *     `created_at` on first write; bumped by `updateMemento`. This is the recency signal
- *     for `search` / `getRecentMementos` / `getMementosInRange` — a memory edited today
+ *     for `search` / `getMementos` — a memory edited today
  *     is "active" today even if created long ago.
  *   - `chronicle_id` — the conversation this memento belongs to. Absent for direct writes.
  *   - `parent_memento_id` — the predecessor turn. Absent for a chronicle's first memento
@@ -103,7 +103,7 @@ export interface MemFile {
 /**
  * In-memory metadata cache populated at startup and kept in sync on every write/update/delete.
  *
- * Powers fast `listMementos`, `getTags`, tag-filtered `recall`, `delete`, and chronicle
+ * Powers fast `getMementos`, `getTags`, tag-filtered `recall`, `delete`, and chronicle
  * grouping without re-reading + decrypting every `.mem` file. Tags are decrypted into RAM
  * at startup; plaintext tags never touch disk.
  *
@@ -152,11 +152,11 @@ export interface RecallResult {
 }
 
 /**
- * One memento in a list view — `getRecentMementos` / `getMementosInRange`. Carries the
- * memento's FULL text (all chunks joined), not a matched chunk. `updatedAt` is the
- * ordering key for both producers (a memento edited today sorts to the top even if first
- * created long ago); the renderer shows it on every row alongside `createdAt` so the
- * ordering key is always visible. `core/render.ts` renders a `MementoSummary[]` into display text.
+ * One memento in a list view — `getMementos`'s row shape. Carries the memento's
+ * FULL text (all chunks joined), not a matched chunk. `updatedAt` is the ordering key
+ * (a memento edited today sorts to the top even if first created long ago); the renderer
+ * shows it on every row alongside `createdAt` so the ordering key is always visible.
+ * `core/render.ts` renders a `MementoSummary[]` into display text.
  */
 export interface MementoSummary {
   id: string
@@ -208,19 +208,6 @@ export interface ChronicleSummary {
   chronicleId: string
   mementoCount: number
   earliest: string
-}
-
-/**
- * One row of the `mementos list` CLI index — metadata only, no memento text. Carries the
- * chunk count (so a multi-chunk memento is flagged) and creation time; `core/render.ts`
- * formats a `MementoIndexEntry[]` into the listing.
- */
-export interface MementoIndexEntry {
-  id: string
-  tags: string[]
-  chunkCount: number
-  chronicleId?: string
-  createdAt: string
 }
 
 /**

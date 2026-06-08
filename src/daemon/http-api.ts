@@ -18,7 +18,7 @@
  *                                  register with the MCP SDK.
  *
  * Every request requires `Authorization: Bearer <token>`. The token is the
- * one written by `generateAndWriteToken()` at daemon startup. Failures: 401
+ * one written by `writeTokenFile()` at daemon startup. Failures: 401
  * (missing/invalid token), 400 (bad JSON / schema), 404 (unknown tool), 500
  * (handler threw).
  *
@@ -35,7 +35,7 @@ import { z } from 'zod'
 import type { Vault } from '../core/vault/index.js'
 import { activeTools, type ToolDef } from '../core/tools.js'
 import { tokensMatch } from './token.js'
-import { DAEMON_HOST, DAEMON_PORT } from './constants.js'
+import { DAEMON_HOST, DAEMON_PORT, MAX_REQUEST_BODY_BYTES } from './constants.js'
 export interface HttpApiServer {
   /** Stop accepting new connections; resolve once the OS releases the port. */
   close(): Promise<void>
@@ -85,7 +85,22 @@ export async function startHttpApi(vault: Vault, opts: StartOpts): Promise<HttpA
   })
 
   return {
-    close: () => new Promise<void>(resolve => server.close(() => resolve())),
+    close: () => new Promise<void>(resolve => {
+      // `server.close()` stops accepting new connections and waits for
+      // every existing one to end — including IDLE keep-alive sockets,
+      // which Node's HTTP server holds open by default (~5s
+      // keepAliveTimeout). The MCP shim talks to the daemon via undici's
+      // pooled `fetch`, so a connected AI client typically owns one idle
+      // keep-alive socket between tool calls. Without dropping idle
+      // sockets explicitly, the daemon's `close()` blocks ~5s on every
+      // shutdown, the cache flush (gated on it) is delayed by the same
+      // amount, and `mementos stop`'s 5s wait-loop races its own
+      // deadline. `closeIdleConnections()` is Node ≥18.2 and drops the
+      // idle pool immediately; in-flight requests still drain via the
+      // outer `close(cb)`.
+      server.close(() => resolve())
+      server.closeIdleConnections()
+    }),
   }
 }
 
@@ -106,16 +121,20 @@ async function handle(
 
   // ── Meta: shim startup probe. ──────────────────────────────────────────────
   if (req.method === 'GET' && url === '/api/_meta/info') {
-    return writeJson(res, 200, { version, searchEnabled: opts.searchEnabled, tools: Object.keys(tools) })
+    return writeJson(res, 200, { version, searchEnabled: opts.searchEnabled })
   }
 
   // ── Tools: POST /api/tools/<name>. ─────────────────────────────────────────
   if (req.method === 'POST' && url.startsWith('/api/tools/')) {
     const name = url.slice('/api/tools/'.length)
-    const tool = tools[name]
+    // `Object.hasOwn` not `name in tools` — names like `__proto__` /
+    // `constructor` are inherited from Object.prototype and would resolve to a
+    // truthy non-tool object, falling through to the schema parse and 500-ing.
+    const tool: ToolDef | undefined = Object.hasOwn(tools, name) ? tools[name] : undefined
     if (!tool) return writeJson(res, 404, { error: `unknown tool: ${name}` })
-    const body = await readJsonBody(req).catch(e => ({ __parseError: (e as Error).message }))
-    if ('__parseError' in body) return writeJson(res, 400, { error: `bad JSON: ${body.__parseError as string}` })
+    let body: Record<string, unknown>
+    try { body = await readJsonBody(req) }
+    catch (e) { return writeJson(res, 400, { error: `bad JSON: ${(e as Error).message}` }) }
     const validation = z.object(tool.inputSchema).safeParse(body)
     if (!validation.success) return writeJson(res, 400, { error: validation.error.message })
     const text = await tool.handler(vault, validation.data)
@@ -124,8 +143,9 @@ async function handle(
 
   // ── Hooks: snapshot/ingest batch path. ─────────────────────────────────────
   if (req.method === 'POST' && url === '/api/hooks/ingest_chronicle') {
-    const body = await readJsonBody(req).catch(e => ({ __parseError: (e as Error).message }))
-    if ('__parseError' in body) return writeJson(res, 400, { error: `bad JSON: ${body.__parseError as string}` })
+    let body: Record<string, unknown>
+    try { body = await readJsonBody(req) }
+    catch (e) { return writeJson(res, 400, { error: `bad JSON: ${(e as Error).message}` }) }
     const validation = INGEST_BODY.safeParse(body)
     if (!validation.success) return writeJson(res, 400, { error: validation.error.message })
     const r = await vault.ingest(
@@ -148,7 +168,18 @@ function checkAuth(req: IncomingMessage, expected: string): boolean {
 
 async function readJsonBody(req: IncomingMessage): Promise<Record<string, unknown>> {
   const chunks: Buffer[] = []
-  for await (const c of req) chunks.push(typeof c === 'string' ? Buffer.from(c) : c as Buffer)
+  let total = 0
+  for await (const c of req) {
+    const buf = typeof c === 'string' ? Buffer.from(c) : c as Buffer
+    total += buf.length
+    if (total > MAX_REQUEST_BODY_BYTES) {
+      // Fail loud: a request this large is either a bug in the client loop
+      // or a stuck ingest. The daemon holds the whole vault in RAM; refusing
+      // before we materialise N MiB of buffers is what keeps it alive.
+      throw new Error(`request body exceeds the ${MAX_REQUEST_BODY_BYTES}-byte cap`)
+    }
+    chunks.push(buf)
+  }
   const raw = Buffer.concat(chunks).toString('utf8').trim()
   if (raw.length === 0) return {}
   const parsed = JSON.parse(raw) as unknown

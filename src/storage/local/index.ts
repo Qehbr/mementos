@@ -60,7 +60,7 @@ export class LocalBackend implements StorageBackend {
     return writeAndStat(join(this.vaultPath, path), data)
   }
 
-  async putBatch(files: Array<{ path: string; data: Buffer }>): Promise<Array<{ path: string; mtimeMs: number }>> {
+  async putBatch(files: Array<{ path: string; data: Buffer }>): Promise<Array<{ mtimeMs: number }>> {
     // Rollback on partial failure unlinks ONLY files that did not exist before this batch:
     // unlinking an overwritten file would lose live data (its previous content is already
     // gone). Migration commits — the overwrite path — are recoverable from the backup.
@@ -83,9 +83,12 @@ export class LocalBackend implements StorageBackend {
       ))
       throw failed.reason instanceof Error ? failed.reason : new Error(String(failed.reason))
     }
+    // Rebuild the result array preserving input order: `path` was carried on the
+    // intermediate fulfilled-value purely for the rollback set (above); the public
+    // contract is index-aligned `{ mtimeMs }`, so drop `path` from the return.
     return results
       .filter((r): r is PromiseFulfilledResult<{ path: string; mtimeMs: number }> => r.status === 'fulfilled')
-      .map(r => r.value)
+      .map(r => ({ mtimeMs: r.value.mtimeMs }))
   }
 
   async list(): Promise<string[]> {

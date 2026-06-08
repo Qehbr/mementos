@@ -25,6 +25,21 @@ import { activeTools } from '../../core/tools.js'
 import { callTool, getDaemonInfo } from '../../daemon/api-client.js'
 
 export async function runMcp(): Promise<void> {
+  // `mementos mcp` is the stdio MCP shim — AI clients spawn it and speak
+  // JSON-RPC over its stdin/stdout. A human running it interactively at a
+  // TTY would see nothing happen (we'd block reading JSON-RPC from stdin
+  // that never arrives) — looks identical to a hang. Detect the TTY case
+  // and point at the commands the user probably meant.
+  if (process.stdin.isTTY) {
+    console.error('`mementos mcp` is the MCP server for AI clients — it speaks JSON-RPC')
+    console.error('over stdin, so there is nothing to do here interactively. You probably want:')
+    console.error('')
+    console.error('  mementos start                       run the background daemon')
+    console.error('  mementos integration enable <name>   connect an AI client')
+    console.error('  mementos doctor                      check installation health')
+    process.exit(1)
+  }
+
   await ensureDaemonRunning()
 
   const info = await getDaemonInfo()

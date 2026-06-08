@@ -16,7 +16,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mkdir, writeFile, readFile, readdir } from 'node:fs/promises'
 import { join } from 'node:path'
-import { setupTestEnv, runInitWithFlags, ProcessExitError, type IntegrationContext } from './_helpers.js'
+import { setupTestEnv, runInitWithFlags, type IntegrationContext } from './_helpers.js'
 import { decryptMemMeta } from '../../core/vault/aad.js'
 import { deriveKeyFromEntropy } from '../../keys/_utils/derivation/index.js'
 import type { MemFile, MemMeta } from '../../core/vault/types.js'
@@ -149,15 +149,20 @@ describe('mementos snapshot', () => {
     expect(after).toEqual(before)
   })
 
-  it('missing transcript_path → exit code 1', async () => {
-    await expect(callSnapshot({})).rejects.toBeInstanceOf(ProcessExitError)
+  it('missing transcript_path → silent return (fail-soft hook posture)', async () => {
+    // Snapshot is fail-soft same as runSessionStart: a malformed payload
+    // never bubbles a non-zero exit / surfaces stderr to the AI client, or
+    // it would interrupt the user's conversation for an op that's strictly
+    // a background convenience. MEMENTOS_DEBUG gates the debug log.
+    await expect(callSnapshot({})).resolves.toBeUndefined()
   })
 
-  it('unknown source (no ingestor claims the path) → silent exit, no error to caller', async () => {
+  it('unknown source (no ingestor claims the path) → silent return', async () => {
     const file = join(ctx.homeDir, 'random.jsonl')
     await writeFile(file, '{"unrelated":"format"}', 'utf8')
-    // No ingestor's `detects` accepts a path outside `.claude/projects` — snapshot logs
-    // a stderr note and exits 0 so the Claude Code hook doesn't surface a failure.
-    await expect(callSnapshot({ transcript_path: file })).rejects.toMatchObject({ code: 0 })
+    // No ingestor's `detects` accepts a path outside `.claude/projects` — snapshot
+    // silently returns (no stderr unless MEMENTOS_DEBUG) so the Claude Code hook
+    // doesn't surface a failure.
+    await expect(callSnapshot({ transcript_path: file })).resolves.toBeUndefined()
   })
 })

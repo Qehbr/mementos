@@ -97,6 +97,14 @@ export async function runDoctor(): Promise<void> {
   console.log('')
   if (fails === 0) {
     console.log('All checks passed.')
+    // For remote-syncing backends, the most common "my memories seem gone"
+    // symptom is "the local clone is behind the remote" — which doctor's
+    // local probes cannot detect (a cheap `list` succeeds even on a stale
+    // clone). Point the user at the one action that resolves it. Skipped
+    // for the local backend (nothing to pull from).
+    if (machine && machine.backend !== 'local') {
+      console.log(`If memories you saved on another device aren't here, run \`mementos sync\` to pull the latest from ${machine.backend}.`)
+    }
   } else {
     console.log(`${fails} check${fails === 1 ? '' : 's'} failed. Address the fix hints above and re-run \`mementos doctor\`.`)
     process.exit(1)

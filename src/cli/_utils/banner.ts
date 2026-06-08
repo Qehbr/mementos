@@ -5,7 +5,7 @@
  * leaving the secrets/archive/mystery palette the product is positioned in.
  *
  * Gated on `process.stdout.isTTY` so the banner NEVER leaks into:
- *   - `mementos serve` (stdout is MCP protocol; any decoration breaks the client)
+ *   - `mementos mcp` (stdout is MCP protocol; any decoration breaks the client)
  *   - `mementos retrieve` / `snapshot` (stdout is piped into the AI's context)
  *   - any piped/redirected output (`mementos --help | less`, `> help.txt`, etc.)
  * `NO_COLOR` is also honored: banner still prints on a TTY, just without ANSI styling.

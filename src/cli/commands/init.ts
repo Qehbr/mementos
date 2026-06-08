@@ -11,7 +11,7 @@
  * Each prompt offers a default; pressing Enter accepts it. Flags (`--backend=git`,
  * `--mode=join`, etc.) skip the corresponding prompt — useful for CI and scripted setup.
  *
- * Init does NOT auto-start `mementos serve`. The MCP server is launched by the AI client
+ * Init does NOT auto-start the daemon. The MCP server is launched by the AI client
  * (Claude Code, Claude Desktop) when it connects — we just print instructions.
  *
  * Refuses to switch keyProvider/embedder on an existing vault — the two modes produce
@@ -275,6 +275,10 @@ async function runInitNew(deps: InitDeps): Promise<void> {
   // for this flow; the header above is the wizard's only progress display.
   header.show(8, ctx.print)
   await setupIntegrations(ctx, integrationReg)
+  // The singleton `_index` memento is seeded lazily by the daemon on first
+  // startup, NOT here — building a vault inside init would block on the
+  // embedder cold-start (~5-10s ONNX load on minilm), and the same lazy
+  // check naturally heals existing vaults that pre-date this invariant.
 }
 
 // ─── Join existing vault flow ─────────────────────────────────────────────────
@@ -577,6 +581,10 @@ export async function setupIntegrations(
   const installedNames = installedIntegrations.filter((n): n is string => n !== null)
   if (installedNames.length > 0) {
     ctx.print(`Open ${installedNames.join(' or ')} — mementos will start automatically when it connects.`)
+    // Mirror `mementos integration enable`'s post-install hint (admin.ts) — the
+    // first-install path is exactly the one where the user needs a "did this
+    // actually work?" affordance, and previously had none.
+    ctx.print('Verify the wiring anytime with:  mementos doctor')
   } else {
     ctx.print('No AI client integrations are currently installed. To use mementos with an AI client later:')
     ctx.print('  mementos integration enable <name>')

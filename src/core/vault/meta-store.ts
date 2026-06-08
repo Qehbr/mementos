@@ -178,13 +178,34 @@ export class MetaStore {
   }
 
   /**
+   * Same filter resolution as `idsMatchingFilter` but materialises the matching
+   * MemMetadata[] directly — saves callers that need the full metas a second
+   * `byId.get(id)` pass over every match. (E.g. `getChronicle` and the tag-
+   * filter branch of `getMementos` previously did `idsMatchingFilter` then
+   * mapped+re-fetched each id.)
+   */
+  *metasMatchingFilter(f: MetaFilter): IterableIterator<MemMetadata> {
+    for (const id of this.idsMatchingFilter(f)) {
+      const meta = this.byId.get(id)
+      if (meta) yield meta
+    }
+  }
+
+  /**
    * Re-thread the whole list sorted by `updated_at` descending. The batch paths call this
    * after `set`-ing a group of mementos whose historical timestamps need not match
    * head-insertion order. O(n log n) — amortised across the batch. Inverted indexes are
    * untouched (they're recency-independent).
    */
   reorderByUpdatedAt(): void {
-    const sorted = [...this.byId.values()].sort((a, b) => b.updated_at.localeCompare(a.updated_at))
+    // ISO-8601 timestamps order correctly under plain `<`/`>`; localeCompare
+    // invokes Intl collation (10–100× slower per call) for zero gain. Same
+    // pattern as `getChronicle` / `listChronicles` in the consumer file —
+    // this is the one full-corpus sort that was missed in that sweep.
+    // Runs on startup() + every doSync that detected a delta + every
+    // doIngest, so the comparator cost scales with corpus size on hot paths.
+    const sorted = [...this.byId.values()].sort((a, b) =>
+      a.updated_at > b.updated_at ? -1 : a.updated_at < b.updated_at ? 1 : 0)
     this.head = sorted.length > 0 ? sorted[0].id : undefined
     for (let i = 0; i < sorted.length; i++) {
       sorted[i].recencyPrev = i > 0 ? sorted[i - 1].id : undefined

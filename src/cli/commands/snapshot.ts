@@ -22,11 +22,24 @@ interface PreCompactPayload {
 }
 
 export async function runSnapshot(payload?: PreCompactPayload): Promise<void> {
-  payload = payload ?? await readStdinJson()
+  // Fail-soft posture throughout — see the longer comment below the
+  // ingestor-discovery block. Every failure path here logs only under
+  // MEMENTOS_DEBUG and returns 0, same as runSessionStart.
+  if (!payload) {
+    try { payload = await readStdinJson() }
+    catch (e) {
+      if (process.env['MEMENTOS_DEBUG']) {
+        console.error(`mementos snapshot: ${(e as Error).message}`)
+      }
+      return
+    }
+  }
   const transcriptPath = payload.transcript_path
   if (!transcriptPath || typeof transcriptPath !== 'string') {
-    console.error('mementos snapshot: stdin payload is missing or has a non-string `transcript_path`.')
-    process.exit(1)
+    if (process.env['MEMENTOS_DEBUG']) {
+      console.error('mementos snapshot: stdin payload is missing or has a non-string `transcript_path`.')
+    }
+    return
   }
 
   // Parse the transcript locally — the ingestor knows the file format. The
@@ -36,20 +49,38 @@ export async function runSnapshot(payload?: PreCompactPayload): Promise<void> {
   const ingestors = [...ingestorReg.values()].map(impl => impl.create())
   const ingestor = await findIngestor(transcriptPath, ingestors)
   if (!ingestor) {
-    console.error(`mementos snapshot: no ingestor claims ${transcriptPath}. Skipping.`)
-    process.exit(0) // not an error worth failing the hook — just nothing to do
+    if (process.env['MEMENTOS_DEBUG']) {
+      console.error(`mementos snapshot: no ingestor claims ${transcriptPath}. Skipping.`)
+    }
+    return
   }
 
+  // Fail-soft from here on, same posture as runSessionStart in runtime.ts.
+  // Snapshot is a hook the AI client invokes around PreCompact; an error
+  // bubbling out as a non-zero exit code (or stderr the client surfaces)
+  // would interrupt the user's conversation for an op that's strictly a
+  // background convenience — the next snapshot fires anyway and the user
+  // can always re-run `mementos ingest <path>` interactively to see the
+  // real error. Debug logging gated on MEMENTOS_DEBUG.
   let sessions
   try {
     sessions = await ingestor.parse(transcriptPath)
   } catch (e) {
-    console.error(`mementos snapshot: failed to parse ${transcriptPath}: ${(e as Error).message}`)
-    process.exit(1)
+    if (process.env['MEMENTOS_DEBUG']) {
+      console.error(`mementos snapshot: failed to parse ${transcriptPath}: ${(e as Error).message}`)
+    }
+    return
   }
   if (sessions.length === 0) return // tool-use-only sessions ingest nothing; stay quiet
 
-  await ensureDaemonRunning()
+  try {
+    await ensureDaemonRunning()
+  } catch (e) {
+    if (process.env['MEMENTOS_DEBUG']) {
+      console.error(`mementos snapshot: daemon not available: ${(e as Error).message}`)
+    }
+    return
+  }
 
   let added = 0
   let skipped = 0
@@ -64,13 +95,13 @@ export async function runSnapshot(payload?: PreCompactPayload): Promise<void> {
       added += r.added
       skipped += r.skipped
     } catch (e) {
-      if (e instanceof DaemonUnavailableError) {
-        console.error(`mementos snapshot: ${e.message}`)
-        process.exitCode = 1
-        break
+      if (process.env['MEMENTOS_DEBUG']) {
+        console.error(`mementos snapshot: ingest failed for chronicle ${s.chronicleId}: ${(e as Error).message}`)
       }
-      console.error(`mementos snapshot: ingest failed for chronicle ${s.chronicleId}: ${(e as Error).message}`)
-      process.exitCode = 1
+      // Daemon went away mid-batch — stop trying; remaining chronicles will
+      // get picked up on the next snapshot. Any other error: skip this one,
+      // continue with the rest.
+      if (e instanceof DaemonUnavailableError) break
     }
   }
   if (added > 0) console.log(`mementos snapshot: +${added} new memento(s), ${skipped} already present`)

@@ -57,6 +57,63 @@ export function hookToggleMessages(
   }
 }
 
+/**
+ * Standard MCP-server toggle prompt — every hook/MCP-having integration uses
+ * the same wording for "Register the X MCP server?", differing only in the
+ * client's full name (`clientName`, e.g. `'Claude Code'`), the short
+ * possessive form used in the prompt (`agentName`, e.g. `'Claude'`), and the
+ * shell-like tool name that integration exposes (`toolWord`, e.g.
+ * `'Bash tool'` or `'shell tool'`). `installedMsg` / `removedMsg` are fixed.
+ *
+ * Returns the `{flag, promptText, installedMsg, removedMsg}` bag to spread
+ * straight into `promptBinaryToggle`:
+ *
+ *   await promptBinaryToggle({
+ *     ctx, surface: this.mcp,
+ *     ...mcpToggleOptions({ integrationType: type, clientName: 'Codex',
+ *                           agentName: 'Codex', toolWord: 'shell tool' }),
+ *   })
+ *
+ * Same precedent as `hookToggleMessages` — one home for the rule so the next
+ * rephrasing lands in one place instead of 4 integrations.
+ */
+export function mcpToggleOptions(opts: {
+  integrationType: string
+  clientName: string
+  agentName: string
+  toolWord: string
+}): { flag: string; promptText: string; installedMsg: string; removedMsg: string } {
+  return {
+    flag: `${opts.integrationType}-mcp`,
+    promptText: `Register the ${opts.clientName} MCP server? (Yes; or No to use the mementos CLI from ${opts.agentName}'s ${opts.toolWord} instead)`,
+    installedMsg: 'MCP server: registered',
+    removedMsg: 'MCP server: removed (CLI + skill mode)',
+  }
+}
+
+/**
+ * Standard skill-file toggle prompt — sibling to `mcpToggleOptions` for the
+ * "Install the X skill file?" prompt. `clientName` names the client for the
+ * prompt ("Install the X skill file?"); `agentName` names what the skill is
+ * teaching ("teaches X when/how"); `skillPath` is the on-disk path to mention
+ * in the success message. `defaultYes: true` — the skill is foundational, so
+ * blind Enter installs it.
+ */
+export function skillToggleOptions(opts: {
+  integrationType: string
+  clientName: string
+  agentName: string
+  skillPath: string
+}): { flag: string; promptText: string; installedMsg: string; removedMsg: string; defaultYes: true } {
+  return {
+    flag: `${opts.integrationType}-skill`,
+    promptText: `Install the ${opts.clientName} skill file? (teaches ${opts.agentName} when/how to use the memory tools)`,
+    installedMsg: `Skill: installed at ${opts.skillPath}`,
+    removedMsg: 'Skill: not installed',
+    defaultYes: true,
+  }
+}
+
 export async function promptBinaryToggle(opts: {
   ctx: InitContext
   surface: import('../interface.js').BinarySurface

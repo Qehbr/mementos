@@ -6,7 +6,7 @@ export const SERVICE = 'mementos'
 export const ACCOUNT = 'default'
 
 // The fallback key file lives OUTSIDE ~/.config/mementos/ on purpose. That directory
-// holds only regenerable machine state (config, HNSW cache, serve registry) and
+// holds only regenerable machine state (config, HNSW cache, daemon PID/token) and
 // `mementos destroy` wipes it wholesale; a non-regenerable secret living inside it would
 // be destroyed even when the user explicitly opts to keep the vault key. ~/.local/share
 // is the XDG data location — separate from config, and not a destroy target.

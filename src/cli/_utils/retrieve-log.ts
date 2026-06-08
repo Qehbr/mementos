@@ -7,7 +7,7 @@ const MAX_LOG_BYTES = 1024 * 1024
 /**
  * Append one failure line to `~/.mementos/retrieve.log`, rotating to `retrieve.log.1` past
  * 1 MB. Best-effort: any I/O error is swallowed — a broken log path must never interrupt
- * the user's conversation, matching the runRetrieve catch that invokes this.
+ * the user's conversation, matching the runSessionStart catch that invokes this.
  */
 export async function logRetrieveFailure(e: unknown): Promise<void> {
   try {

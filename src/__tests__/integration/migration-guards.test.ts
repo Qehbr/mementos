@@ -3,12 +3,13 @@
  *
  *   1. `buildVault` refuses to operate while a migration manifest is pending — so other
  *      commands fail with a clear message instead of a cryptic decrypt error.
- *   2. `mementos migrate` refuses while a `mementos serve` process is alive — a live
- *      server holds a stale key/config/embedder and would corrupt a migration.
+ *   2. `mementos migrate` refuses while the daemon (`mementos start`) is running —
+ *      a live daemon holds a stale key/config/embedder and would corrupt a migration.
+ *      Liveness is the TCP probe in `assertNoServerRunning` → `isDaemonRunning`.
  *   3. `mementos migrate --abort` restores the vault from the backup when a key/embedder
  *      commit was interrupted mid-flight.
  */
-import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { writeFile, readFile, mkdir, copyFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
@@ -41,26 +42,82 @@ describe('migration guards', () => {
     await expect(buildVault()).rejects.toThrow(/unfinished/)
   }, 90_000)
 
-  it('migrate refuses while a mementos server is running', async () => {
-    // Register THIS process as a running server — it is unquestionably alive.
-    const { registerServe } = await import('../../cli/_utils/serve-registry.js')
-    await registerServe()
+  // Closes the race the audit flagged: `mementos migrate` does its
+  // `assertNoServerRunning` check up front, then prompts the user — possibly
+  // for minutes. Without the preflight fence, an auto-started daemon during
+  // that window would cache the old key and race the commit. The fence is a
+  // minimal manifest written BEFORE any prompt that fails `buildVault` in
+  // any spawning daemon.
+  it('preflight fence makes buildVault refuse — closes the migrate-prompt race', async () => {
+    const { withMigrationFence } = await import('../../cli/_utils/migration-manifest.js')
+    const { buildVault } = await import('../../cli/_utils/vault.js')
 
-    process.argv = ['node', 'mementos', 'migrate']
-    const { runMigrate } = await import('../../cli/commands/migrate.js')
-    await expect(runMigrate()).rejects.toBeInstanceOf(ProcessExitError)
+    let buildResult: 'should-not-reach' | 'rejected' = 'should-not-reach'
+    await withMigrationFence(async () => {
+      // While `fn` is running (= the prompts in the real migrate path), a
+      // racing daemon would call buildVault — assert it refuses.
+      try { await buildVault(); buildResult = 'should-not-reach' }
+      catch (e) {
+        if ((e as Error).message.includes('unfinished')) buildResult = 'rejected'
+        else throw e
+      }
+    })
+    expect(buildResult).toBe('rejected')
+
+    // After the fence completes cleanly, no manifest is left behind — the
+    // next migrate / daemon-start sees a clear slate.
+    const { readManifest } = await import('../../cli/_utils/migration-manifest.js')
+    expect(await readManifest()).toBeNull()
+  }, 90_000)
+
+  // If the fence's `fn` throws (e.g. inquirer's ExitPromptError from a Ctrl-C
+  // during a prompt), the manifest is still cleaned up.
+  it('preflight fence cleans up after a throw inside fn', async () => {
+    const { withMigrationFence, readManifest } = await import('../../cli/_utils/migration-manifest.js')
+    await expect(
+      withMigrationFence(async () => { throw new Error('simulated Ctrl-C') })
+    ).rejects.toThrow(/simulated Ctrl-C/)
+    expect(await readManifest()).toBeNull()
+  }, 90_000)
+
+  it('migrate refuses while the daemon is running', async () => {
+    // Pretend a daemon is up. `assertNoServerRunning` reads its signal from
+    // `isDaemonRunning()` (a TCP probe of the daemon port); spying on the
+    // module export gives us a synchronous "true" without needing to start
+    // a real daemon in the test process.
+    const apiClient = await import('../../daemon/api-client.js')
+    const spy = vi.spyOn(apiClient, 'isDaemonRunning').mockResolvedValue(true)
+    try {
+      process.argv = ['node', 'mementos', 'migrate']
+      const { runMigrate } = await import('../../cli/commands/migrate.js')
+      await expect(runMigrate()).rejects.toBeInstanceOf(ProcessExitError)
+    } finally { spy.mockRestore() }
   }, 90_000)
 
   // restore writes through plain storage.putBatch outside the vault lock, so a live
-  // server would race byte-level with the writes AND keep stale in-RAM state. The shared
+  // daemon would race byte-level with the writes AND keep stale in-RAM state. The shared
   // assertNoServerRunning helper must refuse — same posture as migrate.
-  it('restore refuses while a mementos server is running', async () => {
-    const { registerServe } = await import('../../cli/_utils/serve-registry.js')
-    await registerServe()
+  it('restore refuses while the daemon is running', async () => {
+    const apiClient = await import('../../daemon/api-client.js')
+    const spy = vi.spyOn(apiClient, 'isDaemonRunning').mockResolvedValue(true)
+    try {
+      const { runRestore } = await import('../../cli/commands/backup.js')
+      // Path doesn't have to exist — the guard fires before the directory check.
+      await expect(runRestore('/tmp/nonexistent-backup-dir')).rejects.toBeInstanceOf(ProcessExitError)
+    } finally { spy.mockRestore() }
+  }, 90_000)
 
-    const { runRestore } = await import('../../cli/commands/backup.js')
-    // Path doesn't have to exist — the guard fires before the directory check.
-    await expect(runRestore('/tmp/nonexistent-backup-dir')).rejects.toBeInstanceOf(ProcessExitError)
+  // destroy removes ~/.config/mementos/ — which holds the daemon's PID + token
+  // files. Under a live daemon that leaves the daemon running but
+  // un-authenticatable (token gone) and un-stoppable (PID gone). The guard
+  // must refuse BEFORE the interactive checkbox is shown.
+  it('destroy refuses while the daemon is running', async () => {
+    const apiClient = await import('../../daemon/api-client.js')
+    const spy = vi.spyOn(apiClient, 'isDaemonRunning').mockResolvedValue(true)
+    try {
+      const { runDestroy } = await import('../../cli/commands/destroy.js')
+      await expect(runDestroy()).rejects.toBeInstanceOf(ProcessExitError)
+    } finally { spy.mockRestore() }
   }, 90_000)
 
   it('migrate --abort restores the vault from the backup after an interrupted embedder commit', async () => {

@@ -14,7 +14,7 @@ import { join } from 'node:path'
 import { homedir } from 'node:os'
 import { VAULT_CONFIG_FILENAME } from '../../core/config.js'
 import { buildKeyProvider, buildStorageBackend, readMachineConfigOrExit } from '../_utils/vault.js'
-import { readManifest } from '../_utils/migration-manifest.js'
+import { readManifest, withMigrationFence } from '../_utils/migration-manifest.js'
 import { applyVaultFiles } from '../_utils/migration-backup.js'
 import { pathExists } from '../../core/_utils/fs.js'
 import { assertNoServerRunning } from '../_utils/assert-no-server.js'
@@ -76,7 +76,13 @@ export async function runRestore(dir: string | undefined): Promise<void> {
   }
 
   const storage = await storageFor(machine)
-  await applyVaultFiles(storage, dir)
+  // Same TOCTOU as `mementos migrate` — between `assertNoServerRunning` and
+  // `applyVaultFiles`, a hook / mcp shim could auto-start a daemon that
+  // caches the current state and races our overwrite. The window here is
+  // much smaller (no user prompts), but the fix is identical: install the
+  // preflight manifest so any daemon spawned in the window fails `buildVault`
+  // and exits.
+  await withMigrationFence(() => applyVaultFiles(storage, dir))
   console.log(`Restored the vault from ${dir}.`)
 
   // Warn (don't fail) if the restored files don't open under the active key — that means

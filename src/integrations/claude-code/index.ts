@@ -16,9 +16,9 @@ import type { ClientIntegration, BinarySurface } from '../interface.js'
 import { MCP_SERVER_COMMAND, SESSION_START_COMMAND } from '../interface.js'
 import type { IntegrationImplementationModule } from '../registry.js'
 import type { InitContext } from '../../core/init-context/interface.js'
-import { promptBinaryToggle, hookToggleMessages } from '../_utils/prompt.js'
+import { promptBinaryToggle, hookToggleMessages, mcpToggleOptions, skillToggleOptions } from '../_utils/prompt.js'
 import { StepCounter } from '../../cli/_utils/prompts.js'
-import { SKILL_MD, writeSkillFile } from '../_utils/skill.js'
+import { writeSkill, skillFilePath } from '../_utils/skill.js'
 import { HookRegistry, jsonHooksAdapter, type HookSpec } from '../_utils/hook-registry.js'
 
 const claude = cliRunner('claude')
@@ -85,17 +85,12 @@ export class ClaudeCodeIntegration implements ClientIntegration {
   async setupAtInit(ctx: InitContext): Promise<void> {
     try {
       await promptBinaryToggle({
-        ctx, surface: this.mcp, flag: `${type}-mcp`,
-        promptText: 'Register the Claude Code MCP server? (Yes; or No to use the mementos CLI from Claude\'s Bash tool instead)',
-        installedMsg: 'MCP server: registered',
-        removedMsg: 'MCP server: removed (CLI + skill mode)',
+        ctx, surface: this.mcp,
+        ...mcpToggleOptions({ integrationType: type, clientName: 'Claude Code', agentName: 'Claude', toolWord: 'Bash tool' }),
       })
       await promptBinaryToggle({
-        ctx, surface: this.skill, flag: `${type}-skill`,
-        promptText: 'Install the Claude Code skill file? (teaches Claude when/how to use the memory tools)',
-        installedMsg: `Skill: installed at ${this.skillPath}`,
-        removedMsg: 'Skill: not installed',
-        defaultYes: true,
+        ctx, surface: this.skill,
+        ...skillToggleOptions({ integrationType: type, clientName: 'Claude Code', agentName: 'Claude', skillPath: this.skillPath }),
       })
       await this.promptHooks(ctx)
     } catch (e) {
@@ -149,7 +144,7 @@ export class ClaudeCodeIntegration implements ClientIntegration {
     // Clean up the pre-1.0.2 flat-file path before writing the per-folder one —
     // otherwise re-init leaves a no-op file Claude Code ignores.
     await safeUnlink(join(homedir(), '.claude', 'skills', 'mementos.md'))
-    await writeSkillFile(this.skillDir, 'SKILL.md', SKILL_MD)
+    await writeSkill(this.skillDir)
   }
 
   /**
@@ -176,7 +171,7 @@ export class ClaudeCodeIntegration implements ClientIntegration {
   }
 
   private get skillPath(): string {
-    return join(this.skillDir, 'SKILL.md')
+    return skillFilePath(this.skillDir)
   }
 
   /**

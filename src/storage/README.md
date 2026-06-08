@@ -8,7 +8,7 @@ interface StorageBackend {
   sync(): Promise<void>     // periodic sync (git pull); no-op for local FS
   get(path: string, opts?: { etag?: boolean }): Promise<{ data: Buffer; etag: string }>
   put(path: string, data: Buffer, opts?: { ifMatch?: string }): Promise<{ mtimeMs: number }>
-  putBatch(files: Array<{ path: string; data: Buffer }>): Promise<Array<{ path: string; mtimeMs: number }>>
+  putBatch(files: Array<{ path: string; data: Buffer }>): Promise<Array<{ mtimeMs: number }>>  // index-aligned to input order — callers match by position, NOT by path
   list(): Promise<string[]>
   stat(path: string): Promise<{ mtimeMs: number }>
   delete(path: string): Promise<void>

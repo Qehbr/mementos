@@ -13,9 +13,10 @@
  * (so GitBackend commits + pushes it). Read after `storage.init()` has populated the local
  * working tree — `readVaultConfig` is the post-clone read used by buildVault.
  */
-import { readFile, writeFile, mkdir } from 'node:fs/promises'
+import { readFile, mkdir } from 'node:fs/promises'
 import { join, dirname } from 'node:path'
 import { homedir } from 'node:os'
+import { atomicWriteFile } from './_utils/fs.js'
 import type { MachineConfig, VaultConfig } from './types.js'
 
 /**
@@ -94,11 +95,18 @@ export async function readMachineConfigOrNull(): Promise<MachineConfig | null> {
   })
 }
 
-/** Persist the per-machine config, creating the XDG config directory if necessary. */
+/**
+ * Persist the per-machine config, creating the XDG config directory if necessary.
+ * Uses `atomicWriteFile` (tmp+rename) — the migrate cutover at
+ * `migrate.ts:writeMachineConfig(target)` is the durable commit point of the
+ * staged-migration commit phase, so a torn write here would wedge the vault
+ * into a "refusing to start until manually repaired" state (the manifest is
+ * still on disk; the config is half-bytes). Atomic rename closes that window.
+ */
 export async function writeMachineConfig(config: MachineConfig): Promise<void> {
   const file = machineConfigFile()
   await mkdir(dirname(file), { recursive: true })
-  await writeFile(file, JSON.stringify(config, null, 2), 'utf8')
+  await atomicWriteFile(file, JSON.stringify(config, null, 2))
 }
 
 // ─── VaultConfig ──────────────────────────────────────────────────────────────

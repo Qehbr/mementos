@@ -16,7 +16,7 @@
  * shell commands — a different contract from Claude Code's. AI-driven retrieval via the
  * MCP tools, guided by the skill, is the mechanism here.
  *
- * The MCP entry carries no secrets — `mementos serve` reads the vault key from the OS
+ * The MCP entry carries no secrets — the daemon reads the vault key from the OS
  * keychain at startup.
  */
 import { rm } from 'node:fs/promises'
@@ -27,7 +27,7 @@ import { pathExists } from '../../core/_utils/fs.js'
 import type { ClientIntegration } from '../interface.js'
 import { mcpServerEntry } from '../interface.js'
 import type { IntegrationImplementationModule } from '../registry.js'
-import { SKILL_MD, writeSkillFile } from '../_utils/skill.js'
+import { writeSkill } from '../_utils/skill.js'
 import { defaultSetupAtInit } from '../_utils/default-setup.js'
 import { cliRunner, probeCli } from '../_utils/cli-runner.js'
 
@@ -87,6 +87,6 @@ export class OpenClawIntegration implements ClientIntegration {
   }
 
   private async installSkill(): Promise<void> {
-    await writeSkillFile(this.skillDir, 'SKILL.md', SKILL_MD)
+    await writeSkill(this.skillDir)
   }
 }

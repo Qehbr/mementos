@@ -16,7 +16,8 @@
  * the live port and refuses.
  */
 import { spawn } from 'node:child_process'
-import { readFile, stat } from 'node:fs/promises'
+import { readFile } from 'node:fs/promises'
+import { safeUnlink } from '../../core/_utils/fs.js'
 import { fileURLToPath } from 'node:url'
 import { dirname, resolve as resolvePath } from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
@@ -47,13 +48,7 @@ export async function runStart(): Promise<void> {
   // so the user gets their shell back. The child inherits no stdio, so its
   // output doesn't bleed into the parent terminal — `mementos doctor` is how
   // the user checks "is it running?", not "did stdout say so?".
-  const cliEntry = resolvePath(dirname(fileURLToPath(import.meta.url)), '..', 'index.js')
-  const child = spawn(process.execPath, [cliEntry, 'start', '--foreground'], {
-    detached: true,
-    stdio: 'ignore',
-    env: process.env,
-  })
-  child.unref()
+  spawnDaemonDetached()
 
   // Wait for the child to bind the port so the user knows it's actually up.
   // If it doesn't appear within the timeout, the child probably failed to start
@@ -89,11 +84,27 @@ export async function runStop(): Promise<void> {
     process.exit(1)
   }
 
+  // Probe the daemon port BEFORE killing — `isDaemonRunning` is the
+  // authoritative liveness signal (the daemon binds the port for its full
+  // lifetime, releases it on graceful shutdown). The PID file alone is not
+  // enough: the daemon unlinks its own PID on graceful shutdown, so a stale
+  // PID file means the daemon was killed -9 OR crashed AND the OS may have
+  // since recycled the PID to an unrelated process. Sending SIGTERM to that
+  // recycled PID would kill the wrong program. The port probe closes the
+  // dangerous case for free — no daemon listening, PID file is stale, clean
+  // it up and exit.
+  if (!await isDaemonRunning()) {
+    await safeUnlink(DAEMON_PID_FILE)
+    console.error('mementos stop: no daemon running (PID file was stale; cleaned up).')
+    process.exit(1)
+  }
+
   try {
     process.kill(pid, 'SIGTERM')
   } catch (e) {
     if ((e as NodeJS.ErrnoException).code === 'ESRCH') {
       console.error(`mementos stop: PID ${pid} no longer running (stale PID file).`)
+      await safeUnlink(DAEMON_PID_FILE)
       process.exit(1)
     }
     throw e
@@ -127,17 +138,6 @@ export async function ensureDaemonRunning(): Promise<void> {
   if (!ok) throw new Error(`mementos daemon did not start within ${AUTOSTART_TIMEOUT_MS}ms — try \`mementos start --foreground\` to see the error.`)
 }
 
-/**
- * Fire-and-forget variant for hooks. If no daemon is running, spawn one
- * detached and return immediately — the hook does its own work without
- * waiting for the daemon to be ready. The daemon comes up in the background
- * so subsequent CLI/MCP traffic on this machine has a target.
- */
-export async function spawnDaemonIfMissing(): Promise<void> {
-  if (await isDaemonRunning()) return
-  spawnDaemonDetached()
-}
-
 function spawnDaemonDetached(): void {
   const cliEntry = resolvePath(dirname(fileURLToPath(import.meta.url)), '..', 'index.js')
   const child = spawn(process.execPath, [cliEntry, 'start', '--foreground'], {
@@ -157,7 +157,3 @@ async function waitForDaemon(timeoutMs: number): Promise<boolean> {
   return false
 }
 
-// Used by `mementos stop` to verify the PID file references the right thing.
-export async function pidFileExists(): Promise<boolean> {
-  try { await stat(DAEMON_PID_FILE); return true } catch { return false }
-}

@@ -125,18 +125,13 @@ describe('vault.search', () => {
     expect(out).not.toContain('at least 3 characters')
   })
 
-  it('renderSearch follow-up hint is overridable for the CLI vs MCP context', async () => {
-    // MCP path (default): hint names the get_memento tool the AI calls.
-    // CLI path (opts.followUp): hint names the `mementos get` command the user types.
+  it('renderSearch ends with the get_memento follow-up hint', async () => {
+    // All output is daemon-rendered now (both AI via MCP and human via the
+    // CLI see the same text); the previous per-context override is gone.
     await vault.writeMemento({ text: 'find this stuff' })
     const result = await vault.search('stuff', 48, false, true)
-
-    const mcpOut = renderSearch(result, 5)
-    expect(mcpOut).toContain('get_memento')
-
-    const cliOut = renderSearch(result, 5, { followUp: 'Run `mementos get <id>` for full text.' })
-    expect(cliOut).toContain('mementos get')
-    expect(cliOut).not.toContain('get_memento')
+    const out = renderSearch(result, 5)
+    expect(out).toContain('get_memento')
   })
 
   it('works end-to-end with the trigram searcher', async () => {

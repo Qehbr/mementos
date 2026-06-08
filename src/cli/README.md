@@ -126,8 +126,8 @@ Every imported conversation, with its memento count and start time.
 ### `get_tags()`
 All tags in use, with counts. The AI is told to call this before tagging, to reuse tags rather than invent near-duplicates.
 
-### `list_mementos(start?, end?, query?, k?)`
-Mementos in reverse-chronological order by `updated_at`, optionally bounded by a date window and/or ranked by a semantic query. With no params: the k most-recently-touched mementos overall (session bootstrap). With `start`/`end`: "what did we work on last week?" — an old memento edited inside the window is in range. With `query`: results are ranked by semantic relevance instead of recency.
+### `list_mementos(start?, end?, query?, k?, tags?)`
+Mementos in reverse-chronological order by `updated_at`, optionally bounded by a date window, ranked by a semantic `query` (reorder hint, NOT a filter — see `recall` for filtered semantic search), and/or filtered by a `tags` set (mementos carrying any of those tags). All filters STACK. With no params: the k most-recently-touched mementos overall (session bootstrap). With `start`/`end`: "what did we work on last week?" — an old memento edited inside the window is in range. With `tags=["recipes"]`: just the recipe mementos in the window, by recency.
 
 ### `get_memory_index()` / `update_memory_index(text)`
 The vault keeps ONE curated summary memento — a hand-curated top-level view of what's worth knowing. The session-start hook loads its body once per conversation under a `[MEMORY-INDEX]` heading; `get_memory_index` re-reads it on demand and `update_memory_index(text)` revises it. There is only one index memento; its id is resolved internally — no need to track it.
@@ -158,7 +158,7 @@ This makes the lifecycle robust:
 
 ## Uninstalling
 
-mementos installs more than an npm package. It writes machine config, an index cache, and a server registry under `~/.config/mementos/`; registers an MCP server (and skills/hooks) inside each AI client's own config; and stores the vault key in the OS keychain. **`npm uninstall` removes none of that** — npm only manages files inside the package, and modern npm (v7+) runs no uninstall lifecycle script.
+mementos installs more than an npm package. It writes machine config, an index cache, and the daemon's PID + token files under `~/.config/mementos/`; registers an MCP server (and skills/hooks) inside each AI client's own config; and stores the vault key in the OS keychain. **`npm uninstall` removes none of that** — npm only manages files inside the package, and modern npm (v7+) runs no uninstall lifecycle script.
 
 Removal is a two-step process, and the order matters:
 

@@ -61,10 +61,12 @@ describe('sync detects file-content swap (regression for v3 #2)', () => {
       warnings.push(msg)
     })
 
-    let listing
     try {
-      // Trigger a sync via any read entry point
-      listing = await vault1.listMementos()
+      // Trigger a sync via any RAM-only read entry point — getTags walks the
+      // in-RAM tag index without decrypting individual .mem files. The swap
+      // is caught inside doSync (loadAndAuthenticate throws → caught + logged),
+      // and the in-RAM metadata for idA is left untouched.
+      await vault1.getTags()
     } finally {
       errSpy.mockRestore()
     }
@@ -73,10 +75,10 @@ describe('sync detects file-content swap (regression for v3 #2)', () => {
 
     // The whole guarantee is doSync's order: loadAndAuthenticate throws on the swap
     // BEFORE unregister/register mutate the index, so the tampered file is refused and
-    // idA's entry is left untouched. Assert that, not just the warning — a future reorder
-    // that drops or grafts idA would still log the warning but lose data here.
-    expect(listing.map(m => m.id).sort()).toEqual([idA, idB].sort())
-    const a = listing.find(m => m.id === idA)
-    expect(a?.tags).toEqual(['cats'])  // A's own metadata, not grafted from b
+    // idA's RAM state is intact. Verify directly via metaById (no decrypt path) — a
+    // future reorder that dropped or grafted idA here would still log the warning but
+    // lose data on the next read.
+    const aMeta = (vault1 as unknown as { metaById: { get(id: string): { tags: string[] } | undefined } }).metaById.get(idA)
+    expect(aMeta?.tags).toEqual(['cats'])
   }, 90_000)
 })

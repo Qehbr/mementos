@@ -43,3 +43,14 @@ export const AUTOSTART_TIMEOUT_MS = 5_000
 
 /** Poll interval while waiting for the daemon to bind its port. */
 export const AUTOSTART_POLL_INTERVAL_MS = 50
+
+/**
+ * Cap on a single HTTP request body. The daemon is loopback-only and
+ * bearer-token-gated, so only the same Unix user can reach it — DoS isn't a
+ * realistic threat. But a buggy / looping client (or a stuck ingest) sending
+ * unbounded bytes would OOM the daemon that holds the whole vault in RAM.
+ * 64 MiB is well above any realistic legitimate body (the largest is the
+ * ingest_chronicle batch; a 1000-turn chat at 5 KB/turn is ~5 MiB), so this
+ * fails loud on bogus traffic without ever rejecting a real request.
+ */
+export const MAX_REQUEST_BODY_BYTES = 64 * 1024 * 1024

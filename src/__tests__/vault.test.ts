@@ -76,7 +76,7 @@ describe('writeMemento', () => {
     expect(files[0]).toMatch(/\.mem$/)
   })
 
-  it('encrypts tags on disk but exposes them via listMementos', async () => {
+  it('encrypts tags on disk but exposes them via getMementos', async () => {
     await vault.writeMemento({ text: 'tagged memory', tags: ['coding', 'prefs'] })
     const storage = new LocalBackend(dir)
     const files = await storage.list()
@@ -90,7 +90,7 @@ describe('writeMemento', () => {
     expect(data.toString()).not.toContain('prefs')
 
     // Decrypted into RAM and exposed via the API
-    const items = await vault.listMementos()
+    const items = await vault.getMementos({ k: 10000 })
     expect(items[0]?.tags).toEqual(['coding', 'prefs'])
   })
 
@@ -133,7 +133,7 @@ describe('writeMemento', () => {
     // the whole vault. The swapped memento never enters the in-RAM index.
     const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
     const v = await makeVault(dir)
-    expect(await v.listMementos()).toEqual([])
+    expect(await v.getMementos({ k: 10000 })).toEqual([])
     expect(errSpy).toHaveBeenCalled()
     errSpy.mockRestore()
   })
@@ -151,7 +151,7 @@ describe('writeMemento', () => {
     // The filename↔id check rejects the planted file; startup logs it and skips it.
     const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
     const v = await makeVault(dir)
-    expect(await v.listMementos()).toEqual([])
+    expect(await v.getMementos({ k: 10000 })).toEqual([])
     expect(errSpy).toHaveBeenCalled()
     errSpy.mockRestore()
   })
@@ -168,7 +168,7 @@ describe('writeMemento', () => {
     // meta is required on disk; decryptMeta throws, so the memento is logged and skipped.
     const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
     const v = await makeVault(dir)
-    expect(await v.listMementos()).toEqual([])
+    expect(await v.getMementos({ k: 10000 })).toEqual([])
     expect(errSpy).toHaveBeenCalled()
     errSpy.mockRestore()
   })
@@ -186,7 +186,7 @@ describe('writeMemento', () => {
 
     const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
     const v = await makeVault(dir)
-    expect(await v.listMementos()).toEqual([])
+    expect(await v.getMementos({ k: 10000 })).toEqual([])
     expect(errSpy).toHaveBeenCalled()
     errSpy.mockRestore()
   })
@@ -490,17 +490,17 @@ describe('recall — tag filter', () => {
   })
 })
 
-// ─── listMementos ─────────────────────────────────────────────────────────────
+// ─── getMementos (recency / tag listing) ─────────────────────────────────────────────────────────────
 
-describe('listMementos', () => {
+describe('getMementos', () => {
   it('returns an empty array on an empty vault', async () => {
-    expect(await vault.listMementos()).toEqual([])
+    expect(await vault.getMementos({ k: 10000 })).toEqual([])
   })
 
   it('lists stored mementos', async () => {
     await vault.writeMemento({ text: 'first memory', tags: ['work'] })
     await vault.writeMemento({ text: 'second memory', tags: ['personal'] })
-    const allTags = (await vault.listMementos()).flatMap(m => m.tags)
+    const allTags = (await vault.getMementos({ k: 10000 })).flatMap(m => m.tags)
     expect(allTags).toContain('work')
     expect(allTags).toContain('personal')
   })
@@ -508,7 +508,7 @@ describe('listMementos', () => {
   it('filters by tag', async () => {
     await vault.writeMemento({ text: 'work memory', tags: ['work'] })
     await vault.writeMemento({ text: 'personal memory', tags: ['personal'] })
-    const allTags = (await vault.listMementos(['work'])).flatMap(m => m.tags)
+    const allTags = (await vault.getMementos({ tags: ['work'], k: 10000 })).flatMap(m => m.tags)
     expect(allTags).toContain('work')
     expect(allTags).not.toContain('personal')
   })
@@ -544,36 +544,46 @@ describe('chunked mementos', () => {
     expect(files).toHaveLength(0)
   })
 
-  it('listMementos shows a chunked memento as a single entry noting its chunk count', async () => {
-    await vault.writeMemento({ text: LONG_TEXT })
-    const items = await vault.listMementos()
+  it('a chunked memento appears as a single entry in the listing (chunks are an internal detail)', async () => {
+    // The WriteOutcome reports the chunk count produced by the chunker.
+    const written = await vault.writeMemento({ text: LONG_TEXT })
+    expect(written.chunkCount).toBeGreaterThan(1)
+    // The listing rolls the chunks back into one MementoSummary entry.
+    const items = await vault.getMementos({ k: 10000 })
     expect(items).toHaveLength(1)
-    expect(items[0].chunkCount).toBeGreaterThan(1)
+    expect(items[0].id).toBe(written.id)
   })
 })
 
 // ─── Curated memory-index memento (the `_index` tag) ─────────────────────────
 
 describe('memory-index memento', () => {
+  // A bare unit-test Vault doesn't auto-seed (the seed runs in `runDaemon`
+  // after `vault.startup`, not in `startup` itself, so tests building Vaults
+  // directly stay clean). These cover the seed primitive's idempotency.
+
+  it('a fresh Vault has no _index memento yet', async () => {
+    expect(await vault.getIndexEntry()).toBeNull()
+    expect(await vault.getMementos({ tags: [INDEX_TAG], k: 10000 })).toEqual([])
+  })
+
   it('seedIndexIfMissing creates exactly one _index memento on an empty vault', async () => {
-    expect(await vault.listMementos([INDEX_TAG])).toEqual([])
     await vault.seedIndexIfMissing()
-    const seeded = await vault.listMementos([INDEX_TAG])
+    const seeded = await vault.getMementos({ tags: [INDEX_TAG], k: 10000 })
     expect(seeded).toHaveLength(1)
     expect(seeded[0].tags).toContain(INDEX_TAG)
   })
 
-  it('seedIndexIfMissing is a no-op when an _index memento already exists', async () => {
+  it('seedIndexIfMissing is a no-op when the _index already exists (idempotent on daemon restart)', async () => {
     await vault.seedIndexIfMissing()
     await vault.seedIndexIfMissing()
     await vault.seedIndexIfMissing()
-    expect(await vault.listMementos([INDEX_TAG])).toHaveLength(1)
+    expect(await vault.getMementos({ tags: [INDEX_TAG], k: 10000 })).toHaveLength(1)
   })
 
-  it('getIndexText returns null on a fresh vault and the seed body once seeded', async () => {
-    expect(await vault.getIndexText()).toBeNull()
+  it('getIndexEntry returns the seed body once seeded', async () => {
     await vault.seedIndexIfMissing()
-    expect(await vault.getIndexText()).toBe(INDEX_SEED_TEXT)
+    expect((await vault.getIndexEntry())?.text).toBe(INDEX_SEED_TEXT)
   })
 
   it('writeMemento rejects a second _index with ReservedIndexTagError naming the existing id', async () => {
@@ -585,8 +595,8 @@ describe('memory-index memento', () => {
   it('update_memento on the index revises its text without a second memento appearing', async () => {
     const first = await vault.writeMemento({ text: 'initial index', tags: [INDEX_TAG] })
     await vault.updateMemento(first.id, 'revised index')
-    expect(await vault.listMementos([INDEX_TAG])).toHaveLength(1)
-    expect(await vault.getIndexText()).toBe('revised index')
+    expect(await vault.getMementos({ tags: [INDEX_TAG], k: 10000 })).toHaveLength(1)
+    expect((await vault.getIndexEntry())?.text ?? null).toBe('revised index')
   })
 
   it('after deleting the _index, writeMemento with the tag is allowed again', async () => {
@@ -594,7 +604,7 @@ describe('memory-index memento', () => {
     await vault.deleteMemento(first.id)
     const second = await vault.writeMemento({ text: 'rebuilt', tags: [INDEX_TAG] })
     expect(second.id).not.toBe(first.id)
-    expect(await vault.getIndexText()).toBe('rebuilt')
+    expect((await vault.getIndexEntry())?.text ?? null).toBe('rebuilt')
   })
 })
 
@@ -777,6 +787,6 @@ describe('startup', () => {
 
   it('starts cleanly on an empty vault', async () => {
     const freshVault = await makeVault(dir)
-    expect(await freshVault.listMementos()).toEqual([])
+    expect(await freshVault.getMementos({ k: 10000 })).toEqual([])
   })
 })

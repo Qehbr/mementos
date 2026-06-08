@@ -63,7 +63,7 @@ Two short-lived hook subprocesses + one long-lived server:
 
 - **`mementos session-start`** — opt-in, fires once at conversation start. Emits the curated memory-index memento under a `[MEMORY-INDEX]` prelude so the AI knows what's in the vault without having to call `recall` first. Used by `claude-code` (`SessionStart`, matcher `startup|resume`) and `codex` (`SessionStart`).
 - **`mementos snapshot`** — opt-in, fires before context compaction. Ingests the in-progress transcript into the vault so a long conversation doesn't get lost when the client compacts. Used by `claude-code` only (`PreCompact`, matcher `auto`).
-- **MCP server → `mementos mcp`** — stdio MCP shim AI clients register via `claude mcp add ... mementos mcp`. The shim forwards every tool call (`recall`, `write_memento`, `search`, …) to the running daemon (`mementos start`) over plain HTTP. Auto-starts the daemon if not already up — AI clients don't see startup latency. When MCP mode is off, the AI invokes the equivalent CLI commands (`mementos recall "..."`, etc.) via its shell tool — those hit the SAME daemon over the SAME HTTP API, so both paths share one vault. (`mementos serve` is a back-compat alias of `mementos mcp` for one minor version.)
+- **MCP server → `mementos mcp`** — stdio MCP shim AI clients register via `claude mcp add ... mementos mcp`. The shim forwards every tool call (`recall`, `write_memento`, `search`, …) to the running daemon (`mementos start`) over plain HTTP. Auto-starts the daemon if not already up — AI clients don't see startup latency. When MCP mode is off, the AI invokes the equivalent CLI commands (`mementos recall "..."`, etc.) via its shell tool — those hit the SAME daemon over the SAME HTTP API, so both paths share one vault.
 
 Both hook subprocesses also auto-start the daemon. The daemon is **the** vault on this machine; no subprocess builds its own copy. Hook commands carry no secrets — they read the bearer token from `~/.config/mementos/daemon.token` (which the daemon writes `0600` at startup). The per-prompt auto-retrieve hook was retired (the skill + session-start prelude cover the same UX without burning tokens on trivial turns).
 
@@ -76,7 +76,7 @@ The `_utils/` folder centralises the shapes every integration uses:
 - `jsonMcpConfigOps` — install/uninstall/isInstalled against a JSON config with an MCP-server map (used by claude-desktop / cursor / opencode / antigravity IDE).
 - `standardJsonIntegration` — wraps `jsonMcpConfigOps` into a full `ClientIntegration` for MCP-only-JSON clients.
 - `HookRegistry` + `jsonHooksAdapter` — hook lifecycle for the `event → groups → hooks → command` config shape every hook-bearing integration uses. Implements `HookSurface` so `hook(kind)` returns a ready-to-use `BinarySurface`.
-- `writeSkillFile` + `SKILL_BODY` / `SKILL_MD` — skill content (one source of truth across every integration).
+- `writeSkill` / `skillFilePath` / `folderSkillSurface` + `SKILL_BODY` / `SKILL_MD` — skill content + path + the standard `{isInstalled, install, uninstall}` shape (one source of truth across every integration; the `SKILL.md` filename lives in `SKILL_FILENAME`).
 - `withInstallShell` — the standard `try { install + prompt } catch { skip }` shape for `setupAtInit`. Used by `defaultSetupAtInit` for the GUI-only integrations that have no per-component toggles.
 - `cliRunner` + `probeCli` — talking to a client's own CLI.
 - `readJsonConfig` / `writeJsonConfig` — atomic JSON read/write with the malformed-file-refuse rule.

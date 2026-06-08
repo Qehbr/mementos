@@ -50,7 +50,7 @@ describe('readMemento rejects a file whose content was swapped for another memen
     await vault.close()
   }, 90_000)
 
-  it('the query-ranked get_mementos_in_range branch also refuses a swapped file', async () => {
+  it('the query-ranked getMementos branch also refuses a swapped file', async () => {
     await runInitWithFlags([
       '--backend=local',
       '--embedder=minilm',
@@ -73,7 +73,7 @@ describe('readMemento rejects a file whose content was swapped for another memen
 
     // Range with a query → the ranked branch (the one that used to .catch(() => null)).
     await expect(
-      vault.getMementosInRange(undefined, undefined, 'memory A about cats'),
+      vault.getMementos({ query: 'memory A about cats' }),
     ).rejects.toThrow(/id mismatch/)
 
     await vault.close()

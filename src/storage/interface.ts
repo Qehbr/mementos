@@ -39,7 +39,7 @@ export interface StorageBackend {
    *
    * `opts.etag` (default false) requests the etag. Skipped by default because the warm-
    * startup, sync, and probe paths discard it — and MD5-over-file-body × N memories adds
-   * up to a meaningful fraction of every `mementos serve` launch's startup time.
+   * up to a meaningful fraction of every `mementos start` launch's startup time.
    * Returns `etag: ''` when not requested; etag consumers MUST pass `{ etag: true }`.
    */
   get(path: string, opts?: { etag?: boolean }): Promise<{ data: Buffer; etag: string }>
@@ -61,10 +61,11 @@ export interface StorageBackend {
    * Write multiple files atomically from the backend's perspective. For GitBackend this is
    * a single commit + single push for the whole batch. Used for chunked-memory writes.
    *
-   * Returns `{ path, mtimeMs }` per file in the same order as the input, with mtimes
-   * captured from the write FDs — same rationale as `put` above.
+   * Returns one `{ mtimeMs }` per file in the SAME ORDER as the input — order is the
+   * actual contract, callers index-match results to inputs. Mtimes are captured from
+   * the write FDs (no post-write `stat()` race), same rationale as `put` above.
    */
-  putBatch(files: Array<{ path: string; data: Buffer }>): Promise<Array<{ path: string; mtimeMs: number }>>
+  putBatch(files: Array<{ path: string; data: Buffer }>): Promise<Array<{ mtimeMs: number }>>
 
   /** List all `.mem` files in the vault. Cache files (e.g. `_index.hnsw.enc`) are excluded. */
   list(): Promise<string[]>

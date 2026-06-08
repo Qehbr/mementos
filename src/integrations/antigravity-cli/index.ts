@@ -26,8 +26,8 @@ import type { ClientIntegration, BinarySurface } from '../interface.js'
 import { mcpServerEntry } from '../interface.js'
 import type { IntegrationImplementationModule } from '../registry.js'
 import type { InitContext } from '../../core/init-context/interface.js'
-import { SKILL_MD, writeSkillFile } from '../_utils/skill.js'
-import { promptBinaryToggle } from '../_utils/prompt.js'
+import { writeSkill, skillFilePath } from '../_utils/skill.js'
+import { promptBinaryToggle, mcpToggleOptions, skillToggleOptions } from '../_utils/prompt.js'
 import { readJsonConfig, writeJsonConfig } from '../_utils/json-config.js'
 
 // ─── Discovery contract ───────────────────────────────────────────────────────
@@ -89,7 +89,7 @@ export class AntigravityCliIntegration implements ClientIntegration {
   /** Install bundle: plugin manifest + skill file + register-with-agy. Idempotent. */
   async install(): Promise<void> {
     await this.writePluginManifest({ withMcp: true })
-    await writeSkillFile(this.skillDir, 'SKILL.md', SKILL_MD)
+    await writeSkill(this.skillDir)
     await this.registerPluginWithAgy()
   }
 
@@ -114,9 +114,9 @@ export class AntigravityCliIntegration implements ClientIntegration {
    * so the skill is invisible to the CLI.
    */
   readonly skill: BinarySurface = {
-    isInstalled: () => pathExists(join(this.skillDir, 'SKILL.md')),
+    isInstalled: () => pathExists(skillFilePath(this.skillDir)),
     install: async () => {
-      await writeSkillFile(this.skillDir, 'SKILL.md', SKILL_MD)
+      await writeSkill(this.skillDir)
       await this.registerPluginWithAgy()
     },
     uninstall: () => rm(this.skillDir, { recursive: true, force: true }),
@@ -146,17 +146,12 @@ export class AntigravityCliIntegration implements ClientIntegration {
   async setupAtInit(ctx: InitContext): Promise<void> {
     try {
       await promptBinaryToggle({
-        ctx, surface: this.mcp, flag: `${type}-mcp`,
-        promptText: 'Register the Antigravity CLI MCP server? (Yes; or No to use the mementos CLI from Antigravity\'s shell tool instead)',
-        installedMsg: 'MCP server: registered',
-        removedMsg: 'MCP server: removed (CLI + skill mode)',
+        ctx, surface: this.mcp,
+        ...mcpToggleOptions({ integrationType: type, clientName: 'Antigravity CLI', agentName: 'Antigravity', toolWord: 'shell tool' }),
       })
       await promptBinaryToggle({
-        ctx, surface: this.skill, flag: `${type}-skill`,
-        promptText: 'Install the Antigravity CLI skill file? (teaches Antigravity when/how to use the memory tools)',
-        installedMsg: `Skill: installed at ${join(this.skillDir, 'SKILL.md')}`,
-        removedMsg: 'Skill: not installed',
-        defaultYes: true,
+        ctx, surface: this.skill,
+        ...skillToggleOptions({ integrationType: type, clientName: 'Antigravity CLI', agentName: 'Antigravity', skillPath: skillFilePath(this.skillDir) }),
       })
     } catch (e) {
       ctx.print(`Skipped ${this.name}: ${(e as Error).message}`)

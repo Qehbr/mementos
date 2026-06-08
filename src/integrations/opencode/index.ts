@@ -10,9 +10,8 @@
  * No hook: opencode's extension point is JS/TS plugin modules, a different contract from
  * Claude Code's shell-command hooks.
  *
- * The MCP entry carries no secrets; `mementos serve` reads the vault key from the keychain.
+ * The MCP entry carries no secrets; the daemon reads the vault key from the keychain.
  */
-import { rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { homedir } from 'node:os'
 import { pathExists } from '../../core/_utils/fs.js'
@@ -20,8 +19,8 @@ import type { ClientIntegration, BinarySurface } from '../interface.js'
 import { MCP_SERVER_COMMAND } from '../interface.js'
 import type { IntegrationImplementationModule } from '../registry.js'
 import type { InitContext } from '../../core/init-context/interface.js'
-import { SKILL_MD, writeSkillFile } from '../_utils/skill.js'
-import { promptBinaryToggle } from '../_utils/prompt.js'
+import { folderSkillSurface, skillFilePath } from '../_utils/skill.js'
+import { promptBinaryToggle, mcpToggleOptions, skillToggleOptions } from '../_utils/prompt.js'
 import { jsonMcpConfigOps } from '../_utils/json-mcp-config.js'
 
 // ─── Discovery contract ───────────────────────────────────────────────────────
@@ -72,11 +71,7 @@ export class OpenCodeIntegration implements ClientIntegration {
     return pathExists(this.configDir)
   }
 
-  readonly skill: BinarySurface = {
-    isInstalled: () => pathExists(join(this.skillDir, 'SKILL.md')),
-    install: () => writeSkillFile(this.skillDir, 'SKILL.md', SKILL_MD),
-    uninstall: () => rm(this.skillDir, { recursive: true, force: true }),
-  }
+  readonly skill: BinarySurface = folderSkillSurface(this.skillDir)
 
   readonly mcp: BinarySurface = {
     isInstalled: () => this.mcpOps.isInstalled(),
@@ -93,17 +88,12 @@ export class OpenCodeIntegration implements ClientIntegration {
   async setupAtInit(ctx: InitContext): Promise<void> {
     try {
       await promptBinaryToggle({
-        ctx, surface: this.mcp, flag: `${type}-mcp`,
-        promptText: 'Register the opencode MCP server? (Yes; or No to use the mementos CLI from opencode\'s shell tool instead)',
-        installedMsg: 'MCP server: registered',
-        removedMsg: 'MCP server: removed (CLI + skill mode)',
+        ctx, surface: this.mcp,
+        ...mcpToggleOptions({ integrationType: type, clientName: 'opencode', agentName: 'opencode', toolWord: 'shell tool' }),
       })
       await promptBinaryToggle({
-        ctx, surface: this.skill, flag: `${type}-skill`,
-        promptText: 'Install the opencode skill file? (teaches opencode when/how to use the memory tools)',
-        installedMsg: `Skill: installed at ${join(this.skillDir, 'SKILL.md')}`,
-        removedMsg: 'Skill: not installed',
-        defaultYes: true,
+        ctx, surface: this.skill,
+        ...skillToggleOptions({ integrationType: type, clientName: 'opencode', agentName: 'opencode', skillPath: skillFilePath(this.skillDir) }),
       })
     } catch (e) {
       ctx.print(`Skipped ${this.name}: ${(e as Error).message}`)

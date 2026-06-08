@@ -2,7 +2,7 @@
  * Post-init administrative subcommands, all under `mementos integration`:
  *   - `mementos integration list`                  — which AI clients have mementos registered
  *   - `mementos integration enable|disable <name>` — install / uninstall mementos for a client
- *   - `mementos integration hook enable|disable|status <name> [--type=auto-retrieve|pre-compact]`
+ *   - `mementos integration hook enable|disable|status <name> [--type=session-start|pre-compact]`
  *                                                  — manage a client's hooks
  *
  * All operate on already-initialised vaults; they do NOT prompt or run setupAtInit. They
@@ -36,7 +36,7 @@ async function findHookCapable(): Promise<HookCapable[]> {
 
 /**
  * Resolve the `--type=` flag to a hook kind. Defaults to the first kind the integration
- * declares (typically 'auto-retrieve'). Rejects unknown kinds with a pointer at what's
+ * declares (typically 'session-start'). Rejects unknown kinds with a pointer at what's
  * available.
  */
 function resolveHookKind(target: HookCapable): string {
@@ -69,7 +69,7 @@ async function runIntegrationHook(args: string[]): Promise<void> {
     process.exit(1)
   }
   const usage = (): never => {
-    console.error('Usage: mementos integration hook enable | disable | status <name> [--type=auto-retrieve|pre-compact]')
+    console.error('Usage: mementos integration hook enable | disable | status <name> [--type=session-start|pre-compact]')
     console.error(`Hook-capable integrations: ${capable.map(c => c.name).join(', ')}`)
     process.exit(1)
   }

@@ -50,10 +50,10 @@ try {
     mcp?: Record<string, { type?: string; command?: string[]; enabled?: boolean }>
   }
   const server = config.mcp?.['mementos']
-  if (server?.type !== 'local' || server.command?.join(' ') !== 'mementos serve' || server.enabled !== true) {
+  if (server?.type !== 'local' || server.command?.join(' ') !== 'mementos mcp' || server.enabled !== true) {
     fail(`opencode.json mcp entry is wrong:\n${JSON.stringify(config, null, 2)}`)
   }
-  pass('opencode.json has a local "mementos serve" MCP entry')
+  pass('opencode.json has a local "mementos mcp" MCP entry')
 
   if (!await pathExists(skillPath)) fail(`skill file not written at ${skillPath}`)
   const skill = await readFile(skillPath, 'utf8')

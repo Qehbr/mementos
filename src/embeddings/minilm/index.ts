@@ -21,7 +21,7 @@ export function create(): EmbeddingProvider {
 }
 /**
  * Warm the model cache at init: one throwaway embed front-loads the ~150 MB download so
- * `mementos serve` never blocks a first recall (and an online `init` leaves it usable offline).
+ * the daemon never blocks a first recall (and an online `init` leaves it usable offline).
  */
 export async function setupAtInit(ctx: InitContext): Promise<void> {
   ctx.print('Preparing the MiniLM embedding model (all-MiniLM-L6-v2 — first run downloads ~150 MB)...')

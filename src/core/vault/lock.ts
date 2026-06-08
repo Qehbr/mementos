@@ -5,7 +5,7 @@
  * `doSync` — sync mutates the in-memory index and metadata map, so it must serialize
  * against concurrent writers from CLI commands and the MCP server.
  *
- * Reads (recall, search, listMementos, getTags, getMemento) are NOT locked at this layer;
+ * Reads (recall, search, getMementos, getTags, getMemento) are NOT locked at this layer;
  * they're idempotent against concurrent reads and the underlying index supports concurrent
  * search.
  */
@@ -28,26 +28,26 @@ export class VaultBusyError extends Error {
 }
 
 /**
- * Re-entrant per-vault write lock. Wraps the filesystem lock (`withLock`) with an
- * in-process holder flag — proper-lockfile cannot detect that the same process is
- * the current holder, so a nested acquire on the same instance would deadlock on
- * its own lockfile. `WriteLock.run` lets nested calls re-enter without re-acquiring.
+ * Per-vault write lock. Thin wrapper around the filesystem-level `withLock` —
+ * every `run(fn)` acquires the lock for the duration of `fn` and releases it
+ * after.
  *
- * Used for batch writes (CLI ingest of hundreds of sessions) where one outer
- * `run(fn)` holds the lock across many inner Vault writes — instead of acquiring
- * and releasing thousands of times, which opens a race window where a concurrent
- * process can steal the lock between cycles.
+ * An earlier version maintained an in-process `holding` boolean intended for
+ * "re-entrant nested calls," but no caller in the codebase ever nests a
+ * `writeLock.run` inside another. The boolean instead let independent
+ * concurrent same-process callers (two MCP tool calls in flight, a write
+ * racing the periodic flushCache, a write racing doSync) bypass the lock
+ * entirely — which is a data race against the native HNSW graph and the
+ * Vault's in-RAM maps. The flag was removed; every call goes through
+ * `withLock`. Inter-process exclusion uses proper-lockfile's filesystem
+ * lock; intra-process callers serialise on the same lockfile via
+ * proper-lockfile's retry-with-backoff (~10s budget, fine for our scale).
  */
 export class WriteLock {
-  private holding = false
   constructor(private readonly lockPath: string | undefined) {}
 
   async run<T>(fn: () => Promise<T>): Promise<T> {
-    if (this.holding) return fn()
-    return withLock(this.lockPath, async () => {
-      this.holding = true
-      try { return await fn() } finally { this.holding = false }
-    })
+    return withLock(this.lockPath, fn)
   }
 }
 

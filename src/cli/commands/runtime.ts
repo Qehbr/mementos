@@ -21,15 +21,17 @@
  *   get_memory_index / update_memory_index → index (read vs. update),
  *   list_mementos → list, search → search, sync → sync
  *
- * Hook entry points (`session-start`, `snapshot`) stay vault-aware for now
- * — Phase 4 will refactor them to auto-start the daemon then proxy.
+ * Hook entry points (`session-start` here, `snapshot` in its own file) call
+ * `ensureDaemonRunning()` then forward to the daemon over MCP / the `/hooks`
+ * endpoint — they never build a local vault. The vault lives only in the
+ * daemon, always.
  */
 import { parseFlag } from '../_utils/flags.js'
 import { readMachineConfig } from '../../core/config.js'
 import { logRetrieveFailure } from '../_utils/retrieve-log.js'
 import { callTool, DaemonUnavailableError } from '../../daemon/api-client.js'
 import { ensureDaemonRunning } from './daemon.js'
-import { DEFAULT_RECALL_K, DEFAULT_RECENT_LIMIT, DEFAULT_SEARCH_CONTEXT_CHARS, MAX_RECALL_K, MAX_RECENT_LIMIT } from '../../core/vault/constants.js'
+import { DEFAULT_RECALL_K, DEFAULT_RECENT_LIMIT, DEFAULT_SEARCH_CONTEXT_CHARS, MAX_RECALL_K, MAX_RECENT_LIMIT, SEARCH_MAX_SNIPPETS } from '../../core/vault/constants.js'
 
 /**
  * SessionStart hook entry point. Auto-starts the daemon if needed (hooks fire
@@ -103,12 +105,38 @@ function failNoDaemon(): never {
 async function callAndPrint(name: string, args: Record<string, unknown>): Promise<void> {
   try {
     const text = await callTool(name, args)
-    if (text) console.log(text)
+    if (text) console.log(translateMcpToCli(text))
   } catch (e) {
     if (e instanceof DaemonUnavailableError) failNoDaemon()
-    console.error((e as Error).message)
+    console.error(translateMcpToCli((e as Error).message))
     process.exit(1)
   }
+}
+
+/**
+ * Translate MCP tool-call forms in a daemon-rendered message to their CLI
+ * command equivalents. The daemon-side renderers and Vault error messages
+ * emit AI-facing strings (e.g. `Call get_memento("abc-123")`) — the AI
+ * consumes those verbatim through the MCP shim, but a human running the
+ * same op via the CLI needs runnable shell commands. This shim only ever
+ * rewrites well-known patterns; anything else passes through unchanged,
+ * so a future message that doesn't match a pattern won't be mangled.
+ *
+ * Only invoked on the CLI surface (via `callAndPrint`); the MCP shim
+ * forwards the daemon's text untouched so the AI sees the MCP names.
+ */
+export function translateMcpToCli(text: string): string {
+  return text
+    // get_memento("abc") | get_memento('abc') → mementos get abc
+    .replace(/get_memento\(["']([^"']+)["']\)/g, 'mementos get $1')
+    // update_memento("abc", ...) → mementos update abc "<text>"
+    .replace(/update_memento\(["']([^"']+)["'][^)]*\)/g, 'mementos update $1 "<text>"')
+    // update_memory_index(<text>) → mementos index "<text>"
+    .replace(/update_memory_index\([^)]*\)/g, 'mementos index "<text>"')
+    // get_tags | get_tags() → mementos tags. The `(?:\(\))?` makes the whole
+    // `()` group optional so "Call get_tags to..." and "Call get_tags() to..."
+    // both rewrite cleanly.
+    .replace(/\bget_tags(?:\(\))?/g, 'mementos tags')
 }
 
 // ─── Commands ────────────────────────────────────────────────────────────────
@@ -250,7 +278,10 @@ export async function runSearch(subcommand: string | undefined, args: string[]):
   }
   await callAndPrint('search', {
     query,
-    k: Number(parseFlag('k')) || DEFAULT_RECALL_K,
+    // Clamp client-side to match runRecall / runList — without it a user
+    // passing `--k=99999` gets a raw Zod 400 from the daemon instead of
+    // the silent-clamp behavior the sibling commands provide.
+    k: Math.min(SEARCH_MAX_SNIPPETS, Number(parseFlag('k')) || DEFAULT_RECALL_K),
     context_chars: Number(parseFlag('context')) || DEFAULT_SEARCH_CONTEXT_CHARS,
     regex: parseFlag('regex') !== undefined,
     ignore_case: parseFlag('case-sensitive') === undefined,

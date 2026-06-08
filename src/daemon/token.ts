@@ -13,7 +13,7 @@
  * `127.0.0.1` (which alone would let any local user POST).
  *
  * The daemon is **local-only by architectural commitment** (see
- * `daemon/endpoint.ts`) — there is no hosted/multi-user mode in mementos.
+ * `daemon/constants.ts`) — there is no hosted/multi-user mode in mementos.
  * Per-user token issuance, OAuth flows, and the rest of that machinery don't
  * apply here.
  */
@@ -22,12 +22,20 @@ import { dirname } from 'node:path'
 import { randomBytes } from 'node:crypto'
 import { DAEMON_TOKEN_FILE, TOKEN_BYTES } from './constants.js'
 
-/** Generate, write `0600`, return the new token. Used by `mementos start`. */
-export async function generateAndWriteToken(): Promise<string> {
+/**
+ * Generate a fresh token in memory. Does NOT touch disk — `mementos start`
+ * calls this BEFORE binding the port so a racing daemon that loses the bind
+ * doesn't overwrite the winner's token file. The winner calls `writeTokenFile`
+ * with the same value only after `startHttpApi` succeeds.
+ */
+export function generateToken(): string {
+  return randomBytes(TOKEN_BYTES).toString('hex')
+}
+
+/** Write `token` to the shared file with `0600` perms. */
+export async function writeTokenFile(token: string): Promise<void> {
   await mkdir(dirname(DAEMON_TOKEN_FILE), { recursive: true }).catch(() => { /* parent may exist */ })
-  const token = randomBytes(TOKEN_BYTES).toString('hex')
   await writeFile(DAEMON_TOKEN_FILE, token, { encoding: 'utf8', mode: 0o600 })
-  return token
 }
 
 /** Read the token file. Throws if missing — clients use that to detect "no daemon". */

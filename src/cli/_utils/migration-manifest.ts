@@ -33,6 +33,23 @@ export type MigrationPhase = 'staging' | 'committing'
 
 export type MigrationManifest =
   | {
+      /**
+       * Pre-flight fence written BEFORE the type/key/embedder prompts fire.
+       * Its only job is to block daemon auto-starts during the interactive
+       * window. `buildVault` refuses on any manifest — including this one —
+       * so a hook-launched daemon spawned mid-prompt fails its startup
+       * instead of caching the old key and racing the commit.
+       *
+       * Gets overwritten by the real (`storage`/`key`/`embedder`) manifest
+       * once the user finishes the prompts. If the user aborts during the
+       * prompts (Ctrl-C, error throw), `withMigrationFence` deletes it.
+       * If a forced kill leaves it on disk, `mementos migrate --abort`
+       * cleans it up — `doAbort` treats it as "nothing to roll back."
+       */
+      type: 'preflight'
+      startedAt: string
+    }
+  | {
       type: 'storage'
       startedAt: string
       targetBackend: string
@@ -104,6 +121,44 @@ export async function deleteManifest(): Promise<void> {
 }
 
 /**
+ * Write a `preflight` manifest, run `fn`, then clean up.
+ *
+ * **Why**: `assertNoServerRunning` runs once before the interactive prompts in
+ * `mementos migrate` (mnemonic entry, embedder pick, …) and the real manifest
+ * is only written after them. In the meantime — possibly minutes — a Claude
+ * SessionStart hook or an MCP shim could call `ensureDaemonRunning`,
+ * `buildVault` would see no manifest, and the new daemon would cache the
+ * current (old) key. When the migration's commit then rewrites every `.mem`
+ * under the new key, the running daemon's writes encrypt under the OLD key
+ * and land in the new vault → drop-on-next-startup data loss.
+ *
+ * The fence closes the window: the preflight manifest fails `buildVault`
+ * in the daemon, so any daemon auto-started during the prompts exits
+ * cleanly before it can cache a key or serve a write.
+ *
+ * On successful completion of `fn`, the cleanup checks the manifest type —
+ * if it's still `preflight` (i.e. the migration aborted before writing the
+ * real manifest), the file is removed; if `fn` overwrote it with a real
+ * manifest, the cleanup leaves the real one in place.
+ *
+ * On a throw (including inquirer's `ExitPromptError` from Ctrl-C), the same
+ * check runs in `finally`.
+ *
+ * (A `kill -9` during the preflight window leaves the file on disk;
+ * `mementos migrate --abort` cleans it via the `preflight` branch in
+ * `doAbort`.)
+ */
+export async function withMigrationFence<T>(fn: () => Promise<T>): Promise<T> {
+  await writeManifest({ type: 'preflight', startedAt: new Date().toISOString() })
+  try {
+    return await fn()
+  } finally {
+    const current = await readManifest().catch(() => null)
+    if (current?.type === 'preflight') await deleteManifest()
+  }
+}
+
+/**
  * Refuse to act on a `key` / `embedder` manifest whose `stagingPath` / `backupPath` aren't
  * what *this* code would compute for the recorded `startedAt` + the user's actual
  * `vaultPath` (i.e. siblings of the vault dir with the standard name shape — see
@@ -116,7 +171,9 @@ export async function deleteManifest(): Promise<void> {
  * (`promptPath` at migration start), so a sibling-path check would be wrong.
  */
 export function validateManifestPaths(m: MigrationManifest, vaultPath: string): void {
-  if (m.type === 'storage') return
+  // `storage` migrations: user-chosen `targetVaultPath`, no sibling-path rule.
+  // `preflight` fence: no paths at all, nothing to validate.
+  if (m.type === 'storage' || m.type === 'preflight') return
   const expectedStaging = stagingDirFor(vaultPath, m.startedAt)
   const expectedBackup = backupDirFor(vaultPath, m.startedAt)
   if (m.stagingPath !== expectedStaging || m.backupPath !== expectedBackup) {

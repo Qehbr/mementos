@@ -30,6 +30,8 @@ mementos init       # interactive — write down the 24-word vault key
 
 After init, mementos auto-detects the AI clients on your machine and wires itself in. Open Claude Code / Cursor / Codex / Antigravity CLI / Claude Desktop / opencode / OpenClaw and start chatting — mementos is already there. The AI calls `recall` when past context would help, and `write_memento` when it learns something worth remembering.
 
+Installed a new AI client later? Wire it in with `mementos integration enable <name>` (`mementos integration list` shows the names). `mementos doctor` confirms which clients are connected.
+
 ## What it does
 
 - **One install, no infrastructure.** No Docker, no Postgres, no Qdrant. `npm install -g` and you're done.
@@ -88,6 +90,10 @@ Plus two cross-cutting pieces:
 ## Contributing
 
 Adding a new storage backend, embedder, retriever, searcher, key provider, ingestor, or AI-client integration is **one folder under `src/<abstraction>/<name>/`** — no edits to `core/`, no edits to the CLI, no registry entries. See [CONTRIBUTING.md](./CONTRIBUTING.md) for the discovery contract and per-abstraction guides.
+
+## Uninstall
+
+Run `mementos uninstall` **before** `npm uninstall -g mementos`. The interactive prompt removes MCP entries, skills, and hooks from every connected AI client, plus this machine's config (and the vault key if you tick it). npm can't run cleanup on uninstall, so doing it the other way around leaves dangling MCP entries each AI client will try to spawn on every launch — and the binary you'd use to clean them up is gone. Encrypted `.mem` files are never touched; the command prints where they live.
 
 ## License
 

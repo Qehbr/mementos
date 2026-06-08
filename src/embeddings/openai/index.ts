@@ -28,7 +28,7 @@ export async function setupAtInit(ctx: InitContext): Promise<void> {
   await ensurePackage('openai', s => ctx.print(s))
   if (!process.env['OPENAI_API_KEY']) {
     ctx.warn('Note: OpenAIEmbedder requires OPENAI_API_KEY in the environment at runtime.')
-    ctx.warn('You will see errors at startup if it is unset when mementos serve runs.')
+    ctx.warn('You will see errors at startup if it is unset when the mementos daemon runs.')
   }
 }
 

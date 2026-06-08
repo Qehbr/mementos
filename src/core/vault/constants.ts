@@ -39,7 +39,7 @@ export const RETRIEVAL_DISTANCE_THRESHOLD = 0.5
 
 /** Default `k` for `recall` and `search` — top-N matches returned. */
 export const DEFAULT_RECALL_K = 5
-/** Default `limit` for `getRecentMementos` and `getMementosInRange.k`. */
+/** Default `k` for `getMementos` — the "recency feed" length. */
 export const DEFAULT_RECENT_LIMIT = 10
 /** Default `contextChars` for `search` — characters on each side of a match. */
 export const DEFAULT_SEARCH_CONTEXT_CHARS = 48
@@ -71,7 +71,7 @@ export const SEARCH_MAX_SNIPPETS = 200
  */
 /** `recall.k` upper bound — caps top-N for semantic recall. */
 export const MAX_RECALL_K = 1000
-/** `get_recent_mementos.limit` and `get_mementos_in_range.k` upper bound. */
+/** `list_mementos.k` upper bound — caps how many mementos one listing call returns. */
 export const MAX_RECENT_LIMIT = 1000
 /** `search.context_chars` upper bound — characters of surrounding context per match. */
 export const MAX_SEARCH_CONTEXT_CHARS = 4096
@@ -125,17 +125,26 @@ export const MEM_EXTENSION = '.mem'
 // ─── Memory index (the curated summary memento) ──────────────────────────────
 
 /**
- * Reserved tag for the single curated memory-index memento. The AI maintains one
- * memento with this tag as a high-level summary of vault contents (analogous to
- * the MEMORY.md index pattern in file-based memory systems). vault.startup()
- * seeds an empty one if missing, vault.writeMemento rejects a second one, and
- * the auto-retrieve hook always loads this memento's text so the AI sees the
- * curated overview every turn without an explicit recall call.
+ * Reserved tag for the single curated memory-index memento. The AI maintains
+ * one memento with this tag as a high-level summary of vault contents
+ * (analogous to the MEMORY.md index pattern in file-based memory systems).
+ *
+ * Invariant: every vault that has been served by the daemon at least once has
+ * exactly one `_index` memento. The daemon's `vault.seedIndexIfMissing()`
+ * runs on its startup path (`runDaemon` after `vault.startup`) — see
+ * `daemon/runner.ts`. The seed is idempotent: a no-op if the singleton is
+ * already present (a freshly-init'd vault on first daemon start writes it;
+ * subsequent starts return immediately). `writeMemento` rejects a second
+ * `_index` via `ReservedIndexTagError`; `update_memory_index` revises the
+ * existing one. `get_memory_index` therefore always returns a real entry
+ * once any daemon has booted against the vault — the "null" branch in the
+ * tool handler is only reachable if the singleton was manually deleted, or
+ * the tool is called against a freshly-init'd vault whose daemon hasn't
+ * booted yet (unusual — the daemon is what serves the tool).
  */
 export const INDEX_TAG = '_index'
 
-/** Seed body written when no `_index` memento exists. Plain text — no leading
- *  header, since the retrieve hook prepends its own `[MEMORY-INDEX]:` framing. */
+/** Seed body written by the daemon on first start for the singleton `_index` memento. */
 export const INDEX_SEED_TEXT =
   '(empty — this memory index gets populated as the AI accumulates ' +
   'knowledge about the user and ongoing work. Each line links one durable ' +

@@ -44,8 +44,9 @@ export function requireImpl<F>(
  * Caller must `await vault.startup()`.
  *
  * Strict: throws if either config file is missing rather than falling back to defaults.
- * The post-init commands (serve/retrieve/list/get/delete) all need an initialised vault;
- * a silent default-fallback would mask "user forgot to init" as an empty-vault edge case.
+ * The post-init paths (the daemon, hook subprocesses, migrate/backup) all need an
+ * initialised vault; a silent default-fallback would mask "user forgot to init" as
+ * an empty-vault edge case.
  */
 export async function buildVault(): Promise<Vault> {
   // Refuse to operate on a vault with an unfinished migration. Key/embedder migrations
@@ -160,18 +161,6 @@ export async function buildStorageAndKey(
   return {
     storage: requireImpl(storageReg, cfg.backend, 'storage backend').create(cfg),
     keyProvider: requireImpl(keyReg, cfg.keyProvider, 'key provider').create(),
-  }
-}
-
-/** Build + start a Vault, run `fn`, and always close it (flushing the cache). */
-export async function withVault<T>(fn: (vault: Vault) => Promise<T>): Promise<T> {
-  const vault = await buildVault()
-  await vault.startup()
-  try {
-    return await fn(vault)
-  } finally {
-    await vault.close().catch((e: unknown) =>
-      console.error(`cache flush skipped: ${(e as Error).message}`))
   }
 }
 

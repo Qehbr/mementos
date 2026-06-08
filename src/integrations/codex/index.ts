@@ -1,8 +1,11 @@
 /**
  * CodexIntegration — MCP server via `codex mcp add` (config.toml is owned by Codex's own
  * CLI; we don't poke at it), skill at ~/.agents/skills/mementos/SKILL.md, opt-in
- * UserPromptSubmit hook in ~/.codex/hooks.json (a sibling of config.toml — JSON, no TOML
- * dep). Codex has no PreCompact event yet.
+ * SessionStart hook in ~/.codex/hooks.json (a sibling of config.toml — JSON, no TOML
+ * dep). Codex has no PreCompact event yet. (UserPromptSubmit is reachable in Codex's
+ * own hooks.json schema but mementos no longer installs anything on that event — the
+ * per-prompt auto-retrieve hook was retired for token cost; the session-start hook
+ * loads the curated memory index once at conversation start instead.)
  */
 import { rm } from 'node:fs/promises'
 import { join } from 'node:path'
@@ -13,9 +16,9 @@ import type { ClientIntegration, BinarySurface } from '../interface.js'
 import { MCP_SERVER_COMMAND, SESSION_START_COMMAND } from '../interface.js'
 import type { IntegrationImplementationModule } from '../registry.js'
 import type { InitContext } from '../../core/init-context/interface.js'
-import { promptBinaryToggle, hookToggleMessages } from '../_utils/prompt.js'
+import { promptBinaryToggle, hookToggleMessages, mcpToggleOptions, skillToggleOptions } from '../_utils/prompt.js'
 import { StepCounter } from '../../cli/_utils/prompts.js'
-import { SKILL_MD, writeSkillFile } from '../_utils/skill.js'
+import { folderSkillSurface, skillFilePath } from '../_utils/skill.js'
 import { HookRegistry, jsonHooksAdapter, type HookSpec } from '../_utils/hook-registry.js'
 
 /** Run `codex <args>` as a subprocess — Codex's own CLI owns the MCP-config schema. */
@@ -75,15 +78,11 @@ export class CodexIntegration implements ClientIntegration {
   }
 
   /**
-   * Init-time flow. Install if not already installed, then prompt for the auto-retrieval
-   * hook (default = current state, so `--reinit` keeps things via Enter). Flag
-   * `--codex-hook-auto-retrieve=on|off` skips the prompt.
+   * Init-time flow. Install if not already installed, then prompt for the
+   * session-start hook (default = current state, so `--reinit` keeps things
+   * via Enter). Flag `--codex-hook-session-start=on|off` skips the prompt.
    */
-  readonly skill: BinarySurface = {
-    isInstalled: () => pathExists(join(this.skillDir, 'SKILL.md')),
-    install: () => writeSkillFile(this.skillDir, 'SKILL.md', SKILL_MD),
-    uninstall: () => rm(this.skillDir, { recursive: true, force: true }),
-  }
+  readonly skill: BinarySurface = folderSkillSurface(this.skillDir)
 
   readonly mcp: BinarySurface = {
     isInstalled: () => this.isInstalled(),
@@ -94,17 +93,12 @@ export class CodexIntegration implements ClientIntegration {
   async setupAtInit(ctx: InitContext): Promise<void> {
     try {
       await promptBinaryToggle({
-        ctx, surface: this.mcp, flag: `${type}-mcp`,
-        promptText: 'Register the Codex MCP server? (Yes; or No to use the mementos CLI from Codex\'s shell tool instead)',
-        installedMsg: 'MCP server: registered',
-        removedMsg: 'MCP server: removed (CLI + skill mode)',
+        ctx, surface: this.mcp,
+        ...mcpToggleOptions({ integrationType: type, clientName: 'Codex', agentName: 'Codex', toolWord: 'shell tool' }),
       })
       await promptBinaryToggle({
-        ctx, surface: this.skill, flag: `${type}-skill`,
-        promptText: 'Install the Codex skill file? (teaches Codex when/how to use the memory tools)',
-        installedMsg: `Skill: installed at ${join(this.skillDir, 'SKILL.md')}`,
-        removedMsg: 'Skill: not installed',
-        defaultYes: true,
+        ctx, surface: this.skill,
+        ...skillToggleOptions({ integrationType: type, clientName: 'Codex', agentName: 'Codex', skillPath: skillFilePath(this.skillDir) }),
       })
       const steps = new StepCounter(1)
       await promptBinaryToggle({

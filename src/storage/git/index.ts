@@ -527,13 +527,13 @@ export class GitBackend implements StorageBackend {
     }
   }
 
-  async putBatch(files: Array<{ path: string; data: Buffer }>): Promise<Array<{ path: string; mtimeMs: number }>> {
+  async putBatch(files: Array<{ path: string; data: Buffer }>): Promise<Array<{ mtimeMs: number }>> {
     await mkdir(this.config.localPath, { recursive: true })
     // Parallel writes — independent paths/inodes, no fsync ordering required. Each FD
     // captures its own mtime so the caller skips a second `stat` round-trip.
     const written = await Promise.all(files.map(async ({ path, data }) => {
       const { mtimeMs } = await writeAndStat(join(this.config.localPath, path), data)
-      return { path, mtimeMs }
+      return { mtimeMs }
     }))
 
     const versionedPaths = files.map(f => f.path).filter(isVersioned)

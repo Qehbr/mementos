@@ -33,7 +33,7 @@ import { promptTheme, dim } from '../_utils/style.js'
 import { parseFlag } from '../_utils/flags.js'
 import { promptForNewKey } from '../_utils/new-key.js'
 import {
-  readManifest, writeManifest, deleteManifest, validateManifestPaths,
+  readManifest, writeManifest, deleteManifest, validateManifestPaths, withMigrationFence,
   type MigrationManifest, type MigrationPhase,
 } from '../_utils/migration-manifest.js'
 import {
@@ -68,24 +68,31 @@ export async function runMigrate(): Promise<void> {
 
   const pending = await readManifest()
   if (pending) {
+    // Resume / abort flow doesn't need a fresh fence — the existing manifest
+    // IS the fence (buildVault already refuses on it).
     validateManifestPaths(pending, machine.vaultPath)
     await resumeOrAbort(machine, pending)
     return
   }
 
-  const ctx = new CliInitContext()
-  const type = await promptType()
-  switch (type) {
-    case 'storage':
-      await runStorageMigration(ctx, machine)
-      return
-    case 'key':
-      await runKeyMigration(ctx, machine)
-      return
-    case 'embedder':
-      await runEmbedderMigration(ctx, machine)
-      return
-  }
+  // Fresh migration: install the preflight fence BEFORE any prompt so a
+  // daemon auto-started by a hook / mcp shim during the interactive window
+  // can't cache the old key and race the commit. See `withMigrationFence`.
+  await withMigrationFence(async () => {
+    const ctx = new CliInitContext()
+    const type = await promptType()
+    switch (type) {
+      case 'storage':
+        await runStorageMigration(ctx, machine)
+        return
+      case 'key':
+        await runKeyMigration(ctx, machine)
+        return
+      case 'embedder':
+        await runEmbedderMigration(ctx, machine)
+        return
+    }
+  })
 }
 
 // ─── Type prompt ──────────────────────────────────────────────────────────────
@@ -513,7 +520,11 @@ async function doStorageCopy(ctx: CliInitContext, source: MachineConfig, target:
   await probeTarget(target)
   ctx.print(`Probe passed.`)
 
-  // Atomic swap: rewrite the MachineConfig pointing at the target.
+  // Atomic swap: rewrite the MachineConfig pointing at the target. The
+  // `writeMachineConfig` path uses tmp+rename, so a SIGKILL / power loss
+  // here either keeps the source-pointing config or atomically swaps to
+  // the target-pointing one — never a torn half-write that would wedge
+  // the next `mementos migrate` against a corrupt config.
   await writeMachineConfig(target)
   ctx.print(`Wrote ${machineConfigFile()} — vault now points at ${target.backend} at ${target.vaultPath}`)
 
@@ -558,6 +569,16 @@ async function probeTarget(target: MachineConfig): Promise<void> {
 
 async function resumeOrAbort(machine: MachineConfig, manifest: MigrationManifest): Promise<void> {
   const ctx = new CliInitContext()
+  // `preflight` was left behind by a hard kill mid-prompt; there's nothing
+  // staged to resume, so just clean up the fence and start fresh.
+  if (manifest.type === 'preflight') {
+    ctx.print(`Detected an interrupted migration prompt (started=${manifest.startedAt}). Cleaning up the fence and starting fresh.`)
+    await deleteManifest()
+    // Tail-call into a fresh runMigrate via the same body — but simpler to
+    // just have the user re-invoke; printing the hint keeps the flow honest.
+    ctx.print('Re-run `mementos migrate` to begin.')
+    return
+  }
   ctx.print(`Detected migration in progress (type=${manifest.type}, started=${manifest.startedAt}).`)
   new WizardHeader('mementos migrate (resume)', 1).show(1, ctx.print)
   const cont = await confirmPrompt({
@@ -615,6 +636,12 @@ async function doAbort(
   manifest: MigrationManifest, machine: MachineConfig | null, ctx: CliInitContext,
 ): Promise<void> {
   switch (manifest.type) {
+    case 'preflight': {
+      // Nothing to roll back — the preflight fence is just a sentinel. Delete it.
+      ctx.print('Removing the preflight fence; vault is unchanged.')
+      await deleteManifest()
+      return
+    }
     case 'storage': {
       ctx.print(`Aborting storage migration — removing ${manifest.targetVaultPath}.`)
       ctx.print(`(Source vault is untouched.)`)

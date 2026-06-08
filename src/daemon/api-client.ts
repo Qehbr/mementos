@@ -24,7 +24,7 @@ export class DaemonUnavailableError extends Error {
 }
 
 export class DaemonApiError extends Error {
-  constructor(message: string, public status: number) { super(message); this.name = 'DaemonApiError' }
+  constructor(message: string) { super(message); this.name = 'DaemonApiError' }
 }
 
 /** Quick TCP-connect probe. No HTTP roundtrip — used for liveness checks. */
@@ -60,11 +60,15 @@ export async function ingestChronicle(args: {
 }
 
 /**
- * GET `/api/_meta/info` — `{ version, searchEnabled, tools: string[] }`. Used
- * by the MCP shim at startup to know which tools to register.
+ * GET `/api/_meta/info` — `{ version, searchEnabled }`. Used by the MCP shim
+ * at startup: `version` becomes the MCP server's reported version, and
+ * `searchEnabled` flips whether the `search` tool is registered. The shim
+ * derives the tool list locally via `activeTools({searchEnabled})` — both
+ * sides import the same registry, so a duplicated `tools` field would just be
+ * a drift surface.
  */
-export async function getDaemonInfo(): Promise<{ version: string; searchEnabled: boolean; tools: string[] }> {
-  return (await fetchJson('GET', '/api/_meta/info')) as { version: string; searchEnabled: boolean; tools: string[] }
+export async function getDaemonInfo(): Promise<{ version: string; searchEnabled: boolean }> {
+  return (await fetchJson('GET', '/api/_meta/info')) as { version: string; searchEnabled: boolean }
 }
 
 async function postJson(path: string, body: Record<string, unknown>): Promise<unknown> {
@@ -72,29 +76,41 @@ async function postJson(path: string, body: Record<string, unknown>): Promise<un
 }
 
 async function fetchJson(method: 'GET' | 'POST', path: string, body?: Record<string, unknown>): Promise<unknown> {
-  if (!await isDaemonRunning()) {
-    throw new DaemonUnavailableError('no mementos daemon running (start it with `mementos start`)')
-  }
+  // Read the token first — its absence is the cheapest, most reliable signal
+  // that no daemon is up. (Skipping the previous `isDaemonRunning()` TCP
+  // pre-probe: it was wasted work — fetch already attempts the connection —
+  // AND the probe-then-fetch window was a real race where the daemon could
+  // die between the two, surfacing a raw `fetch failed` instead of our typed
+  // `DaemonUnavailableError`.)
   let token: string
   try { token = await readToken() }
-  catch { throw new DaemonUnavailableError('no daemon token (start it with `mementos start`)') }
+  catch { throw new DaemonUnavailableError('no mementos daemon running (start it with `mementos start`)') }
 
   const url = DAEMON_URL + path
-  const res = await fetch(url, {
-    method,
-    headers: {
-      'authorization': `Bearer ${token}`,
-      ...(body !== undefined ? { 'content-type': 'application/json' } : {}),
-    },
-    body: body !== undefined ? JSON.stringify(body) : undefined,
-  })
+  let res: Response
+  try {
+    res = await fetch(url, {
+      method,
+      headers: {
+        'authorization': `Bearer ${token}`,
+        ...(body !== undefined ? { 'content-type': 'application/json' } : {}),
+      },
+      body: body !== undefined ? JSON.stringify(body) : undefined,
+    })
+  } catch {
+    // Network-level failure — `fetch failed` (ECONNREFUSED/ECONNRESET). The
+    // daemon either isn't listening at all or died mid-request. Either way
+    // the caller should see this as "no daemon" so callAndPrint can print
+    // the standard "Run mementos start" hint instead of a raw fetch error.
+    throw new DaemonUnavailableError('no mementos daemon running (start it with `mementos start`)')
+  }
   const text = await res.text()
   let parsed: unknown
   try { parsed = text.length > 0 ? JSON.parse(text) : {} }
-  catch { throw new DaemonApiError(`daemon returned malformed JSON: ${text.slice(0, 200)}`, res.status) }
+  catch { throw new DaemonApiError(`daemon returned malformed JSON: ${text.slice(0, 200)}`) }
   if (!res.ok) {
     const msg = (parsed as { error?: unknown } | undefined)?.error
-    throw new DaemonApiError(typeof msg === 'string' ? msg : `HTTP ${res.status}`, res.status)
+    throw new DaemonApiError(typeof msg === 'string' ? msg : `HTTP ${res.status}`)
   }
   return parsed
 }

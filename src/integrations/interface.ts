@@ -18,7 +18,7 @@
 /**
  * The argv used to launch the MCP server from any client's config. Hardcoded constant —
  * every integration writes the same entry. Lives here so a single change updates every
- * client. Note: secrets are NEVER passed via argv; the `mementos serve` subprocess reads
+ * client. Note: secrets are NEVER passed via argv; the daemon reads
  * the vault key from the OS keychain at startup.
  */
 export const MCP_SERVER_COMMAND = ['mementos', 'mcp'] as const

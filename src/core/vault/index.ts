@@ -17,10 +17,11 @@ import type { Searcher, SearchOutcome } from '../../searchers/interface.js'
 import type { SearchResult as VectorSearchResult } from '../../vector/interface.js'
 import { AuthenticationError } from './crypto.js'
 import { needsChunking, chunkText, buildChunks } from './chunker.js'
+import { topK } from '../../retrievers/_utils/top-k.js'
 import type {
   MemFile, MemMeta, MemMetadata, MemChunk, Memory,
   RecallResult, MementoSummary, MementoDetail, ChronicleEntry,
-  TagCount, ChronicleSummary, MementoIndexEntry, WriteOutcome, SearchResult,
+  TagCount, ChronicleSummary, WriteOutcome, SearchResult,
 } from './types.js'
 import {
   SYNC_INTERVAL_MS, DUPLICATE_DISTANCE_THRESHOLD, RETRIEVAL_DISTANCE_THRESHOLD,
@@ -35,7 +36,7 @@ import { validateId, idFromMemFilename } from './constants.js'
 import { encryptMemPayloads, decryptMemChunks, decryptMemMeta } from './aad.js'
 import { WriteLock } from './lock.js'
 import { tryLoadIndexCache, saveIndexCache } from './cache.js'
-import { MetaStore, metaMatches, isMetaFilterActive, type MetaFilter } from './meta-store.js'
+import { MetaStore, isMetaFilterActive, metaMatches, type MetaFilter } from './meta-store.js'
 import { chunkKey, mementoIdOf, chunkIndexOf } from './chunk-key.js'
 
 /** Vault construction options. */
@@ -159,9 +160,9 @@ export class Vault {
    */
   private inFlightFlush: Promise<void> | null = null
   /**
-   * Re-entrant write lock. Use `vault.writeLock.runBatch(fn)` to hold across
-   * many inner writes (e.g. CLI ingest); inner `writeMemento`/`ingest`/...
-   * calls automatically re-enter rather than re-acquire.
+   * Per-vault write lock around every state-mutating method (write/update/
+   * delete/ingest/sync/flushCache). Inter-process exclusion via proper-lockfile;
+   * concurrent same-process callers serialise on the same lockfile.
    */
   readonly writeLock: WriteLock
 
@@ -409,7 +410,11 @@ export class Vault {
 
   // ─── In-RAM state helpers ─────────────────────────────────────────────────
 
-  /** Build and register a memento's metadata. Caller must guarantee `id` is not yet in metaById. */
+  /**
+   * Build and register a memento's metadata. Replace-safe — `MetaStore.set`
+   * handles a pre-existing id by un-indexing the old tags/chronicle/recency
+   * before re-indexing the new ones, so callers don't need to `delete` first.
+   */
   private recordMeta(id: string, m: MemMeta, chunkCount: number, mtimeMs: number): MemMetadata {
     validateId(id)
     if (m.chronicle_id !== undefined) validateId(m.chronicle_id)
@@ -700,11 +705,37 @@ export class Vault {
     if (!regex && query.length < MIN_LITERAL_QUERY_CHARS) return { status: 'short-query' }
     await this.syncIfStale()
 
+    // Three filter cases for building the recency-ordered candidate list:
+    //
+    //   (a) No filter → walk the maintained recency list directly. Already
+    //       updated_at-desc; no sort.
+    //   (b) Exclude-only filter (no chronicleId, no include-tags — just
+    //       `excludeTags`) → walk recency and skip excluded members on the
+    //       fly. Same O(corpus) walk as (a) with O(1) per-item check; NO
+    //       sort. `metasMatchingFilter` would otherwise hand back nearly the
+    //       whole corpus from the `byId.keys()` base and the materialise-
+    //       and-sort tail would turn this into O(n log n) — and
+    //       `exclude_tags=["source:claude-code"]` IS the documented primary
+    //       exclude use, hitting most of a chat-imported vault.
+    //   (c) Include-narrowing filter (chronicleId or include-tags) →
+    //       resolve via the inverted index for O(matches), then sort over
+    //       the small match set. Same pattern recall / getMementos use.
     const filter: MetaFilter = { chronicleId, tags, excludeTags }
     const active = isMetaFilterActive(filter)
-    const orderedIds = [...this.metaById.values()]
-      .filter(meta => !active || metaMatches(meta, filter))
-      .map(meta => meta.id)
+    const excludeOnly = active && !chronicleId && !tags?.length && (excludeTags?.length ?? 0) > 0
+    let orderedIds: string[]
+    if (!active) {
+      orderedIds = [...this.metaById.values()].map(m => m.id)
+    } else if (excludeOnly) {
+      orderedIds = []
+      for (const meta of this.metaById.values()) {
+        if (metaMatches(meta, filter)) orderedIds.push(meta.id)
+      }
+    } else {
+      orderedIds = [...this.metaById.metasMatchingFilter(filter)]
+        .sort((a, b) => a.updated_at > b.updated_at ? -1 : a.updated_at < b.updated_at ? 1 : 0)
+        .map(m => m.id)
+    }
     if (active && orderedIds.length === 0) return { status: 'no-candidates' }
 
     let outcome: SearchOutcome
@@ -747,7 +778,11 @@ export class Vault {
   }
 
   private async doUpdateMemento(id: string, text: string, tags?: string[]): Promise<WriteOutcome> {
-    const current = await this.readMemento(id)
+    // Optimistic-concurrency: the etag captures pre-edit file state, paired
+    // with `ifMatch` on the put so a concurrent device's sync between our
+    // read and our write surfaces as StaleMementoError instead of silently
+    // clobbering. This is the only read path that needs it.
+    const current = await this.readMemento(id, { etag: true })
     if (!current) throw new Error(`Cannot update — memento not found: ${id}`)
     const { meta: oldMeta, etag } = current
     const oldChunkCount = current.chunks.length
@@ -797,7 +832,16 @@ export class Vault {
 
   private async doDeleteMemento(id: string): Promise<void> {
     const meta = this.metaById.get(id)
-    if (!meta) throw new Error(`Memory not found: ${id}`)
+    if (!meta) {
+      // Same recovery hint as renderMemento — the AI / CLI hit this when an id
+      // is stale (deleted on another device, mistyped, or came from the memory
+      // index but the underlying memento is gone). Tell them how to recover.
+      throw new Error(
+        `Memory not found: ${id}\n` +
+        `  (id may be wrong, the memento may have already been deleted, or it may live on another device — ` +
+        `call recall to find it by content, or sync then retry)`,
+      )
+    }
 
     await this.deps.storage.delete(`${id}.mem`)
     this.unregisterMemento(id, meta.chunkCount)
@@ -808,6 +852,12 @@ export class Vault {
 
   async getTags(): Promise<TagCount[]> {
     await this.syncIfStale()
+    // localeCompare is INTENTIONAL here (and the only remaining one in the
+    // vault file) — tag names are user-visible arbitrary text and benefit
+    // from Intl collation for diacritic / case ordering. Bounded by unique
+    // tag count (typically ≤ a few hundred), so the per-call cost is
+    // negligible. The sister sorts on ISO-8601 timestamps and UUIDs use
+    // plain `<`/`>` — see reorderByUpdatedAt / getChronicle / listChronicles.
     return Array.from(this.metaById.tagEntries())
       .sort(([a], [b]) => a.localeCompare(b))
       .map(([tag, count]) => ({ tag, count }))
@@ -830,36 +880,27 @@ export class Vault {
   }
 
   /**
-   * Read the canonical memory-index memento's text — the auto-retrieve hook
-   * prepends this to its output every turn so the AI always sees the curated
-   * vault summary. Returns null when no index exists (lazy-seed hasn't run yet
-   * or the AI deleted it); the hook then omits the prelude entirely rather
-   * than synthesise a placeholder.
-   */
-  async getIndexText(): Promise<string | null> {
-    const id = this.findIndexMementoId()
-    if (!id) return null
-    const detail = await this.getMemento(id)
-    return detail?.text ?? null
-  }
-
-  /**
-   * Lazy seed for the `_index` memento. Called by the session-start hook (not
-   * startup) — that way unit tests over the Vault class see an empty vault by
-   * default and only production paths through the hook create the placeholder.
-   * Best-effort: a failed seed (e.g. embedder offline on first run) leaves the
-   * index empty for that turn and gets retried next call.
+   * Lazily seed the singleton `_index` placeholder memento. Called by the
+   * daemon once at startup, after `vault.startup()`. Idempotent: if the
+   * `_index` already exists (the common case after first run), this is an
+   * O(1) hashmap check and a return. If it doesn't (fresh vault, OR an
+   * existing vault that pre-dates this invariant), the seed is written.
+   *
+   * Why daemon-startup rather than init: building a vault inside `mementos
+   * init` would block on the embedder cold-start (~5-10s ONNX load on
+   * minilm) — bad UX in the wizard. The daemon already pays that cost
+   * once when it boots, so adding one idempotent line there is free and
+   * naturally heals pre-existing vaults.
    */
   async seedIndexIfMissing(): Promise<void> {
     if (this.findIndexMementoId()) return
     await this.writeMemento({ text: INDEX_SEED_TEXT, tags: [INDEX_TAG] })
-      .catch(() => { /* fail-silent: index is best-effort, not load-bearing */ })
   }
 
-  /** Read the `_index` memento as `{id, text}` for the dedicated MCP tool.
-   *  Returns null when no index exists — caller seeds via `seedIndexIfMissing`
-   *  and re-reads. Kept separate from `getMemento(id)` so the AI never has to
-   *  know the index's id. */
+  /** Read the `_index` memento as `{id, text}` for the `get_memory_index` tool.
+   *  Returns null only if the singleton was deleted manually (a vault
+   *  initialised through `mementos init` always has it). Kept separate from
+   *  `getMemento(id)` so the AI never has to know the index's id. */
   async getIndexEntry(): Promise<{ id: string; text: string } | null> {
     const id = this.findIndexMementoId()
     if (!id) return null
@@ -892,12 +933,17 @@ export class Vault {
     validateId(chronicleId)
     await this.syncIfStale()
 
-    const metas: MemMetadata[] = []
-    for (const id of this.metaById.idsMatchingFilter({ chronicleId })) {
-      const meta = this.metaById.get(id)
-      if (meta) metas.push(meta)
-    }
-    metas.sort((a, b) => a.created_at.localeCompare(b.created_at) || a.id.localeCompare(b.id))
+    const metas = [...this.metaById.metasMatchingFilter({ chronicleId })]
+    // ISO-8601 timestamps and UUID ids both order correctly under plain `<`/`>`;
+    // localeCompare invokes Intl collation (10–100× slower per call) for zero
+    // gain. The chronicle iteration size can be large for bulk-imported chats.
+    metas.sort((a, b) => {
+      if (a.created_at < b.created_at) return -1
+      if (a.created_at > b.created_at) return 1
+      if (a.id < b.id) return -1
+      if (a.id > b.id) return 1
+      return 0
+    })
     if (metas.length === 0) return []
 
     // A parent referenced by 2+ mementos is a fork point.
@@ -934,33 +980,38 @@ export class Vault {
         if (m.created_at < c.earliest) c.earliest = m.created_at
       }
     }
+    // ISO-8601 timestamps order correctly under plain `<`/`>` — see getChronicle.
     return [...byChronicle.entries()]
-      .sort(([, a], [, b]) => b.earliest.localeCompare(a.earliest))
+      .sort(([, a], [, b]) => (a.earliest < b.earliest ? 1 : a.earliest > b.earliest ? -1 : 0))
       .map(([id, c]) => ({ chronicleId: id, mementoCount: c.count, earliest: c.earliest }))
   }
 
-  /** Most-recently-active first (ordered by `updated_at`, not created_at). */
-  async getRecentMementos(limit = DEFAULT_RECENT_LIMIT): Promise<MementoSummary[]> {
-    await this.syncIfStale()
-    // Take the prefix off the recency-ordered generator — it yields newest-first lazily, so
-    // a top-k read is O(k). Spreading the whole thing would walk all n just to drop most.
-    const n = Math.max(1, limit)
-    const metas: MemMetadata[] = []
-    for (const meta of this.metaById.values()) {
-      metas.push(meta)
-      if (metas.length === n) break
-    }
-    return this.loadSummaries(metas.map(m => m.id))
-  }
-
   /**
-   * Mementos active within a date window (matched against `updated_at`, so edits keep a
-   * memento "in range"). With a `query`, results are ranked by the retriever and trimmed
-   * to top-k; without one, returned reverse-chronological.
+   * Mementos matching any combination of date window, semantic query, and
+   * tag filter — the unified listing path. All four filters STACK:
+   *   - `start` / `end` bound the `updated_at` window (so a memento edited
+   *     today stays in range even if first created long ago)
+   *   - `tags` is a union (a memento is included if it carries ANY of them)
+   *   - `query` switches ranking from recency to semantic relevance
+   *   - `k` caps the result size
+   *
+   * Defaults: `k = DEFAULT_RECENT_LIMIT` (10), every other filter undefined.
+   * `getMementos({})` is "newest 10 across the vault" — the default
+   * recency feed both the CLI's `mementos list` and the AI's
+   * `list_mementos` tool serve when called without args.
    */
-  async getMementosInRange(start?: string, end?: string, query?: string, k = DEFAULT_RECENT_LIMIT, tags?: string[]): Promise<MementoSummary[]> {
+  async getMementos(opts: {
+    start?: string
+    end?: string
+    query?: string
+    k?: number
+    tags?: string[]
+  } = {}): Promise<MementoSummary[]> {
     await this.syncIfStale()
     if (this.metaById.size === 0) return []
+
+    const { start, end, query, tags } = opts
+    const k = opts.k ?? DEFAULT_RECENT_LIMIT
 
     // A date-only `end` ("2026-05-13") names the whole day. Without this, the lexical
     // compare against a full `updated_at` timestamp ("2026-05-13T10:00:00Z" > "2026-05-13")
@@ -987,51 +1038,62 @@ export class Vault {
     if (allowed.size === 0) return []
 
     if (!query) {
-      // No query → recency-sort the allowed set, take top k. Sort cost is bounded by the
-      // filter set, not the corpus, so tag-narrowed listings stay fast.
-      const sorted = [...allowed]
-        .map(id => this.metaById.get(id))
-        .filter((m): m is NonNullable<typeof m> => !!m)
-        .sort((a, b) => b.updated_at.localeCompare(a.updated_at))
-        .slice(0, Math.max(1, k))
-        .map(m => m.id)
-      return this.loadSummaries(sorted)
-    }
-
-    // Query → semantic rank restricted to the allowed set (native filteredSearch).
-    const { order } = await this.rankSemantic(query, k, allowed)
-    const ranked = order.slice(0, k)
-    if (ranked.length === 0) return []
-    return this.loadSummaries(ranked)
-  }
-
-  async listMementos(tags?: string[]): Promise<MementoIndexEntry[]> {
-    await this.syncIfStale()
-    // Tag-filtered: resolve via the tag inverted index FIRST, then sort the (smaller) result.
-    // Sorting the full corpus to keep ~1% of it would be backwards.
-    const metas: MemMetadata[] = []
-    if (tags?.length) {
-      for (const id of this.metaById.idsMatchingFilter({ tags })) {
-        const meta = this.metaById.get(id)
-        if (meta) metas.push(meta)
+      // No query → top-k by recency over the filtered set. `topK` is the
+      // size-k min-heap (`retrievers/_utils/top-k.ts`) — O(m log k) where m
+      // is the filter-set size, vs. the old O(m log m) full sort + slice.
+      // For a broad tag (e.g. `source:claude-code` covering most of the
+      // corpus) m can be tens of thousands while k stays ~10, so this is
+      // strictly better at every m and dramatically better at the extremes.
+      // Date.parse on an ISO-8601 string is cheaper per-comparison than
+      // localeCompare; `topK` calls the scorer once per item, then the heap
+      // does numeric compares.
+      const scoreById = (id: string): number => {
+        const m = this.metaById.get(id)
+        // `allowed` came from idsMatchingFilter, which already dropped any id
+        // whose metaById.get returned undefined, so the fallback is unreachable
+        // — kept for type-safety only.
+        return m ? Date.parse(m.updated_at) : -Infinity
       }
-    } else {
-      for (const meta of this.metaById.values()) metas.push(meta)
+      const ids = topK(allowed, Math.max(1, k), scoreById)
+      return this.loadSummaries(ids)
     }
-    metas.sort((a, b) => a.id.localeCompare(b.id))
-    return metas.map(meta => ({
-      id: meta.id,
-      tags: meta.tags,
-      chunkCount: meta.chunkCount,
-      ...(meta.chronicle_id ? { chronicleId: meta.chronicle_id } : {}),
-      createdAt: meta.created_at,
-    }))
+
+    // Query → reorder the allowed set: semantically-relevant members come
+    // first (best-first), then the rest fill the remaining slots by recency.
+    //
+    // **Query reorders, never filters.** `recall` is the relevance-filtered
+    // semantic-search tool — it correctly returns [] for a cold query.
+    // `list_mementos` is a listing whose name promises completeness within
+    // the user-specified filter set; piping the listing through a hidden
+    // relevance gate (the old behavior) silently dropped tagged mementos
+    // that DID match the tag/window, leaving a misleading "no mementos
+    // match those tags" message. Now the contract matches the name: query
+    // is a presentation hint on top of the filter, never a second filter.
+    const { order: rankedAll } = await this.rankSemantic(query, k, allowed)
+    const ranked = rankedAll.slice(0, k)
+    if (ranked.length >= k) return this.loadSummaries(ranked)
+
+    // Fill remaining slots from the rest of `allowed`, top-k by recency. The
+    // rest is `allowed \ ranked`. topK over the filtered iterable is O(m log k')
+    // where k' = k - ranked.length.
+    const rankedSet = new Set(ranked)
+    const remainingIds: string[] = []
+    for (const id of allowed) {
+      if (!rankedSet.has(id)) remainingIds.push(id)
+    }
+    if (remainingIds.length === 0) return this.loadSummaries(ranked)
+    const scoreById = (id: string): number => {
+      const m = this.metaById.get(id)
+      return m ? Date.parse(m.updated_at) : -Infinity
+    }
+    const recencyFill = topK(remainingIds, k - ranked.length, scoreById)
+    return this.loadSummaries([...ranked, ...recencyFill])
   }
 
   // ─── Private helpers ──────────────────────────────────────────────────────
 
   /**
-   * The semantic-query rule, shared by `recall` and the `getMementosInRange` query branch:
+   * The semantic-query rule, shared by `recall` and the `getMementos` query branch:
    * embed → fetch chunk hits → drop everything past the relevance cutoff → collapse to
    * memento order. One source so the cutoff and over-fetch can never be retuned in one
    * caller and silently diverge in the other.
@@ -1090,13 +1152,17 @@ export class Vault {
   /**
    * Read + authenticate one `.mem` by id. ENOENT-tolerant (returns null, reconciles the
    * stale RAM entry — every read path goes through here, self-healing a remote delete);
-   * all other errors propagate. The etag is the optimistic-concurrency token.
+   * all other errors propagate. The etag is the optimistic-concurrency token; only
+   * `doUpdateMemento` needs it, every other caller (recall, getMemento, getChronicle,
+   * loadSummary) leaves the flag off so storage skips the per-call MD5-over-body —
+   * pure win on the bulk-read paths (getChronicle on a 1000-memento chat chronicle
+   * was 1000 throwaway MD5s per call).
    */
   private async readMemento(
     id: string,
+    opts: { etag?: boolean } = {},
   ): Promise<{ mem: MemFile; chunks: MemChunk[]; meta: MemMeta; etag: string } | null> {
-    // Opt in to the etag: this read path feeds updateMemento's optimistic-concurrency check.
-    const got = await this.deps.storage.get(`${id}.mem`, { etag: true }).catch((e: NodeJS.ErrnoException) => {
+    const got = await this.deps.storage.get(`${id}.mem`, { etag: opts.etag === true }).catch((e: NodeJS.ErrnoException) => {
       if (e?.code === 'ENOENT') return null
       throw e
     })

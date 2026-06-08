@@ -126,10 +126,16 @@ const getMemoryIndex: ToolDef<Record<string, never>> = {
   inputSchema: {},
   annotations: { readOnlyHint: true },
   handler: async vault => {
+    // The daemon seeds the singleton `_index` on startup (idempotent), so in
+    // production a real entry always exists by the time this tool is callable.
+    // A null here means either (a) the AI manually deleted the index, or
+    // (b) the vault is freshly init'd and no daemon has booted against it yet
+    // (unusual — the daemon is what serves the tool). Either way, point at
+    // update_memory_index so the AI can heal the state.
     const entry = await vault.getIndexEntry()
     return entry
       ? entry.text
-      : 'No memory index yet — call update_memory_index(<text>) to create one. Keep it under ~30 lines; use it to surface high-signal facts (user preferences, project state, decisions) you would otherwise have to recall every session.'
+      : 'No memory index yet. Create one with update_memory_index(<text>).'
   },
 }
 
@@ -179,21 +185,25 @@ const deleteMemento: ToolDef<{ memento_id: string }> = {
   },
 }
 
-const listMementos: ToolDef<{ start?: string; end?: string; query?: string; k?: number; tags?: string[] }> = {
-  description: 'List mementos in reverse-chronological order by last-update time, optionally constrained by any combination of date window, tag set, and semantic query. All filters STACK: `tags=[X] start=2026-01-01` returns X-tagged mementos updated since Jan 1; `tags=[X] query=Y` returns X-tagged mementos ranked by relevance to Y. With `query`, ranking is semantic; without, ranking is recency.',
+const listMementosTool: ToolDef<{ start?: string; end?: string; query?: string; k?: number; tags?: string[] }> = {
+  description: 'List mementos in reverse-chronological order by last-update time, optionally constrained by a date window and/or tag set. `tags`, `start`, and `end` are TRUE filters — only mementos matching all of them appear. `query` is a presentation hint that REORDERS the listing so semantically-relevant mementos come first (then the rest by recency); it never drops mementos that pass the tag/date filter. For relevance-filtered semantic search (cold queries return empty), use `recall` instead.',
   inputSchema: {
     start: z.string().optional().describe('Lower bound, inclusive. ISO 8601 date or datetime. Omit to allow any.'),
     end: z.string().optional().describe('Upper bound, inclusive. ISO 8601 date or datetime. Omit to allow any.'),
-    query: z.string().optional().describe('Optional natural-language query — when present, results are ranked by relevance to it instead of recency. Stacks with `start`/`end`/`tags`.'),
+    query: z.string().optional().describe('Optional reorder hint — relevant mementos float to the top; non-relevant mementos still appear (after the relevant ones, in recency order). Use `recall` if you need relevance-filtered search instead.'),
     k: z.number().int().positive().max(MAX_RECENT_LIMIT).default(DEFAULT_RECENT_LIMIT).describe(`Max results to return (default ${DEFAULT_RECENT_LIMIT}, max ${MAX_RECENT_LIMIT})`),
     tags: z.array(z.string()).optional().describe('Tag filter — return only mementos carrying at least one of these tags. Stacks with `start`/`end`/`query`.'),
   },
   annotations: { readOnlyHint: true },
   handler: async (vault, { start, end, query, k, tags }) =>
     renderMementoList(
-      await vault.getMementosInRange(start, end, query, k ?? DEFAULT_RECENT_LIMIT, tags),
+      await vault.getMementos({ start, end, query, k, tags }),
       (tags?.length ?? 0) > 0
-        ? 'No mementos match those tags within the given window.'
+        // Mirror the get_chronicle empty-result template: the wrong-tag case is
+        // the single most common failure (tags aren't autocompleted), and
+        // get_tags is one call away — name it so the consumer doesn't dead-end
+        // at "nothing found" when the spelling was simply off.
+        ? 'No mementos match those tags within the given window. Call get_tags to see which tags exist (the spelling may differ).'
         : (start || end ? 'No mementos found in that date range.' : 'No memories stored.'),
     ),
 }
@@ -236,7 +246,7 @@ export const CORE_TOOLS: Record<string, ToolDef> = {
   get_chronicle: getChronicle as unknown as ToolDef,
   list_chronicles: listChronicles as unknown as ToolDef,
   delete_memento: deleteMemento as unknown as ToolDef,
-  list_mementos: listMementos as unknown as ToolDef,
+  list_mementos: listMementosTool as unknown as ToolDef,
 }
 
 /**

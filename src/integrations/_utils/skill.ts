@@ -1,14 +1,45 @@
 /**
  * Shared mementos skill content. One source of truth; each integration wraps it in
  * whatever envelope its client expects (plain `.md`, or YAML-frontmatter `SKILL.md`).
+ *
+ * The Agent-Skills spec (2026) requires the entrypoint to live at `<dir>/SKILL.md`
+ * with YAML frontmatter — the filename is the contract with the spec and any
+ * change to it must land in every probe / write / message that mentions it. This
+ * file is the single source so the rule can't drift.
  */
-import { mkdir, writeFile } from 'node:fs/promises'
+import { mkdir, writeFile, rm } from 'node:fs/promises'
 import { join } from 'node:path'
+import { pathExists } from '../../core/_utils/fs.js'
+import type { BinarySurface } from '../interface.js'
 
-/** mkdir+write the skill at `<dir>/<filename>`. Idempotent. */
-export async function writeSkillFile(dir: string, filename: string, body: string): Promise<void> {
-  await mkdir(dir, { recursive: true })
-  await writeFile(join(dir, filename), body, 'utf8')
+/** Agent-Skills entrypoint filename. Lives here so every integration site
+ *  (write, isInstalled probe, installed-message path) resolves through one rule. */
+export const SKILL_FILENAME = 'SKILL.md'
+
+/** Absolute path of an integration's skill entrypoint file. */
+export function skillFilePath(skillDir: string): string {
+  return join(skillDir, SKILL_FILENAME)
+}
+
+/** mkdir + write the canonical `SKILL.md` (frontmatter-wrapped body) under `skillDir`. Idempotent. */
+export async function writeSkill(skillDir: string): Promise<void> {
+  await mkdir(skillDir, { recursive: true })
+  await writeFile(skillFilePath(skillDir), SKILL_MD, 'utf8')
+}
+
+/**
+ * Standard skill `BinarySurface` shared by integrations whose skill install is
+ * exactly "drop SKILL.md in a folder, remove the folder to uninstall." Codex,
+ * opencode use this verbatim; integrations with extra side effects (Antigravity's
+ * registerPluginWithAgy, claude-code's flat-file cleanup) keep a custom surface
+ * but still call `writeSkill` / `skillFilePath` so the filename owns one home.
+ */
+export function folderSkillSurface(skillDir: string): BinarySurface {
+  return {
+    isInstalled: () => pathExists(skillFilePath(skillDir)),
+    install: () => writeSkill(skillDir),
+    uninstall: () => rm(skillDir, { recursive: true, force: true }),
+  }
 }
 
 export const SKILL_BODY = `# Mementos — Memory Vault
@@ -164,7 +195,7 @@ edited it first. Call get_memento again, re-apply your change to the current tex
 - \`delete_memento(memento_id)\` — delete one memento
 - \`get_chronicle(chronicle_id)\` — read a whole past conversation in order
 - \`list_chronicles()\` — list all imported conversations
-- \`list_mementos(start?, end?, query?, k?)\` — list mementos by recency, optionally bounded by a date window and/or ranked by a query (no args = most recent)
+- \`list_mementos(start?, end?, query?, k?, tags?)\` — list mementos by recency, optionally bounded by a date window, ranked by a relevance query (reorders only, never filters), and/or filtered by a tag set (no args = most recent)
 - \`get_memory_index()\` — re-read the curated index memento
 - \`update_memory_index(text)\` — revise the curated index memento (id is internal)
 - \`sync()\` — pull the latest memories from storage now; call only when the user insists a memento exists but recall came up empty (it may have been written on another device)

@@ -4,7 +4,7 @@
  * Multi-select toggles for the things mementos owns on this machine:
  *
  *   [x] Machine config & state    the whole ~/.config/mementos/ directory — config,
- *                                 HNSW cache, serve registry, any migration manifest
+ *                                 HNSW cache, daemon PID/token, any migration manifest
  *   [x] Vault key                 via KeyProvider.clearStoredKey (provider-specific)
  *   [x] AI client integrations    MCP entries / skills / hooks (those installed)
  *
@@ -27,6 +27,7 @@ import { promptTheme, checkboxTheme, dim } from '../_utils/style.js'
 import { readMachineConfigOrNull, machineConfigFile } from '../../core/config.js'
 import { loadIntegrations } from '../../integrations/registry.js'
 import { buildStorageAndKey } from '../_utils/vault.js'
+import { assertNoServerRunning } from '../_utils/assert-no-server.js'
 import type { MachineConfig } from '../../core/types.js'
 import type { ClientIntegration } from '../../integrations/interface.js'
 import type { StorageBackend } from '../../storage/interface.js'
@@ -42,6 +43,12 @@ export async function runDestroy(): Promise<void> {
     console.log('Nothing to destroy.')
     return
   }
+
+  // Removing ~/.config/mementos/ under a live daemon would leave the daemon
+  // running but un-authenticatable (token file gone) and un-stoppable
+  // (PID file gone). Refuse with a pointer to `mementos stop` before any
+  // checkbox is shown.
+  await assertNoServerRunning('Destroy')
 
   const { storage, keyProvider: provider } = await buildStorageAndKey(machine)
   const installedIntegrations = await collectInstalledIntegrations()

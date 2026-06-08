@@ -9,7 +9,7 @@
  */
 import type {
   RecallResult, MementoSummary, MementoDetail, ChronicleEntry,
-  TagCount, ChronicleSummary, MementoIndexEntry, WriteOutcome, SearchResult,
+  TagCount, ChronicleSummary, WriteOutcome, SearchResult,
 } from './vault/types.js'
 import type { SyncSummary } from './vault/index.js'
 import { MIN_LITERAL_QUERY_CHARS } from './vault/constants.js'
@@ -20,7 +20,7 @@ const CHRONICLE_PREVIEW_CHARS = 200
 /**
  * Header fragment for a memento's chronicle id (or empty when the memento isn't in one).
  * Shared by every renderer that emits a memento header so the format can't drift across
- * MCP recall / get_memento / get_recent_mementos / get_mementos_in_range / CLI list.
+ * MCP recall / get_memento / list_mementos / get_chronicle / CLI list.
  */
 const chronicleFragment = (id: string | undefined): string => id ? ` chronicle=${id}` : ''
 
@@ -44,7 +44,7 @@ export function renderRecall(results: RecallResult[]): string {
 }
 
 /**
- * Render a memento list (`getRecentMementos`, `getMementosInRange`) as `[MEMENTO …]` lines,
+ * Render a memento list (`getMementos`) as `[MEMENTO …]` lines,
  * each showing the memento's full text. An empty list renders as `emptyMessage` — the
  * caller supplies the wording, since "nothing recent" and "nothing in range" differ.
  */
@@ -65,7 +65,15 @@ export function renderMementoList(items: MementoSummary[], emptyMessage: string)
  * argument carries it through so the not-found message can name the missing memento.
  */
 export function renderMemento(detail: MementoDetail | null, id: string): string {
-  if (!detail) return `Memory not found: ${id}`
+  if (!detail) {
+    // Mirror renderChronicle's not-found pattern: name the likely causes AND a
+    // recovery action. A stale id from the memory-index memento (which the AI
+    // persists across sessions) or a cross-device delete are the realistic
+    // hits here; tell the AI how to recover instead of leaving a dead end.
+    return `Memory not found: ${id}\n` +
+      `  (id may be wrong, the memento may have been deleted, or it may live on another device — ` +
+      `call recall to find it by content, or sync then retry)`
+  }
   const parentStr = detail.parentMementoId ? ` parent=${detail.parentMementoId}` : ''
   const tagsStr = detail.tags.length ? ` [${detail.tags.join(', ')}]` : ''
   return `[id=${detail.id}${chronicleFragment(detail.chronicleId)}${parentStr}${tagsStr} ${detail.createdAt}]\n${detail.text}`
@@ -117,22 +125,6 @@ export function renderChronicleList(chronicles: ChronicleSummary[]): string {
     .join('\n')
 }
 
-/**
- * Render the `mementos list` CLI index — one metadata line per memento. An empty list
- * renders as `emptyMessage`: the caller distinguishes "vault empty" from "nothing matched
- * the tag filter", since the wording differs.
- */
-export function renderMementoIndex(items: MementoIndexEntry[], emptyMessage: string): string {
-  if (items.length === 0) return emptyMessage
-  return items
-    .map(m => {
-      const tagsStr = m.tags.length ? ` [${m.tags.join(', ')}]` : ''
-      const chunkStr = m.chunkCount > 1 ? ` (${m.chunkCount} chunks)` : ''
-      return `id=${m.id}${tagsStr}${chunkStr}${chronicleFragment(m.chronicleId)}  ${m.createdAt}`
-    })
-    .join('\n')
-}
-
 /** The `<Verb> memento (id=…[, N chunks])` confirmation shared by write and update. */
 function writeConfirmation(verb: string, o: WriteOutcome): string {
   const chunkPart = o.chunkCount > 1 ? `, ${o.chunkCount} chunks` : ''
@@ -166,14 +158,13 @@ const collapseWhitespace = (s: string): string => s.replace(/\s+/g, ' ')
 /**
  * Render a `search` result. Each non-`ok` status is its own fixed message; an `ok` result
  * is a count header plus up to `k` snippet lines (the counts stay exhaustive — `k` only
- * caps how many snippets are shown) and a follow-up hint.
+ * caps how many snippets are shown) and a fixed follow-up hint pointing at `get_memento`.
  *
- * `opts.followUp` lets the CLI override the AI-facing default (`get_memento(...)` is the
- * MCP tool name) with the equivalent CLI command (`mementos get <id>`). The MCP path
- * accepts the default; the CLI path passes its own so the hint names a command that
- * actually exists on the terminal.
+ * All output is rendered server-side in the daemon now; both the MCP shim and the CLI
+ * just print the same text, so the previous `followUp` override (used by an earlier CLI
+ * path that rendered locally) is gone.
  */
-export function renderSearch(result: SearchResult, k: number, opts?: { followUp?: string }): string {
+export function renderSearch(result: SearchResult, k: number): string {
   switch (result.status) {
     case 'empty-query':
       return 'Empty query.'
@@ -198,8 +189,7 @@ export function renderSearch(result: SearchResult, k: number, opts?: { followUp?
         .map((s, i) => `${i + 1}. [MEMENTO id=${s.mementoId}]: …` +
           `${collapseWhitespace(s.before)}«${collapseWhitespace(s.match)}»${collapseWhitespace(s.after)}…`)
         .join('\n')
-      const followUp = opts?.followUp ?? 'Call get_memento("<id>") for a memento\'s full text.'
-      return `${header}\n${body}\n\n${followUp}`
+      return `${header}\n${body}\n\nCall get_memento("<id>") for a memento's full text.`
     }
   }
 }

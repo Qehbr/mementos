@@ -3,9 +3,11 @@
  * mementos CLI — entry point and dispatcher only. Subcommand handlers live in cli/commands/.
  *
  *   init                     → commands/init.ts        first-time setup, interactive
- *   serve | retrieve         → commands/runtime.ts     vault runtime (AI-facing)
+ *   start | stop             → commands/daemon.ts      background daemon lifecycle
+ *   mcp                      → commands/mcp-shim.ts    stdio MCP shim (AI clients spawn this)
+ *   recall | write | update  → commands/runtime.ts     vault writes / reads (mirror MCP tools)
  *   list  | get | delete     → commands/runtime.ts     vault inspection (user-facing)
- *   hook  | integration      → commands/admin.ts       post-init administration
+ *   integration              → commands/admin.ts       post-init administration
  *
  * The CLI is fully driven by auto-discovery: implementations live in `src/<abstraction>/<name>/`
  * and export `type` + `create` (and optionally `setupAtInit`). The CLI scans those folders
@@ -56,9 +58,6 @@ try {
   switch (command) {
     case 'init':        await runInit(); break
     case 'mcp':         await runMcp(); break
-    // `serve` is a back-compat alias of `mcp` for one minor version — old
-    // integration configs that still say `mementos serve` continue to work.
-    case 'serve':       await runMcp(); break
     case 'start':       await runStart(); break
     case 'stop':        await runStop(); break
     case 'session-start': await runSessionStart(); break
@@ -108,9 +107,14 @@ try {
 }
 
 /**
- * Friendly first-screen for `mementos` with no args — the four primary entry points
- * (init / integration / ingest / serve) plus pointers to full help and doctor. Tight by
+ * Friendly first-screen for `mementos` with no args — the three primary entry points
+ * (init / integration / ingest) plus pointers to full help and doctor. Tight by
  * design; the full reference is one keystroke away via `mementos --help`.
+ *
+ * `mementos start` (the daemon) is NOT here: AI clients auto-start it when they
+ * connect, so the typical user never runs it by hand. Power users running CLI
+ * vault commands without an AI client find it via `--help`. `mementos mcp` is
+ * also absent — it's the stdio shim AI clients spawn, never typed by a human.
  */
 function printQuickstart(): void {
   console.log(`encrypted AI memory vault
@@ -120,7 +124,6 @@ Get started:
   mementos integration enable <name>  Connect an AI tool
                                         (claude-code, codex, antigravity-cli, claude-desktop, …)
   mementos ingest                     Import past conversations (interactive)
-  mementos serve                      Start the MCP server (usually called by your AI client)
 
   mementos --help                     Full command reference
   mementos doctor                     Check installation health
@@ -164,10 +167,20 @@ Usage:
     --integrations=name1,name2|none
     --<integration>-skill=on|off            install a client's skill file
     --<integration>-hook-<kind>=on|off       toggle a client's hook
-                            e.g. --claude-code-hook-auto-retrieve=on
-                                 --codex-hook-auto-retrieve=off
+                            e.g. --claude-code-hook-session-start=on
+                                 --claude-code-hook-pre-compact=off
 
-  mementos serve                               Start the MCP server (called by AI tools)
+  # Daemon lifecycle. The daemon holds the vault in memory for the lifetime of
+  # multiple sessions; AI clients auto-start it on first connect, so users only
+  # touch these when running CLI vault commands without an AI client open, or
+  # when recovering from a stuck state (e.g. doctor says \`mementos stop && start\`).
+  mementos start [--foreground]                Start the background daemon. --foreground
+                                               keeps it attached for debugging (logs to
+                                               stdout, Ctrl-C kills cleanly).
+  mementos stop                                Stop the running daemon.
+
+  mementos mcp                                 Stdio MCP shim for AI clients. AI clients
+                                               spawn this; humans don't run it directly.
 
   # Recall + write (mirror the MCP tools; shell-capable AI clients can use these
   # instead of MCP via their Bash/Shell tool).
@@ -208,11 +221,12 @@ Usage:
   mementos integration configure               Re-run the interactive integration selection
                                                (same prompts as init's integrations step; pre-checks
                                                what's already installed, blind Enter keeps it).
-  mementos integration hook enable | disable | status <name> [--type=auto-retrieve|pre-compact]
-                                               Manage a client's hooks. claude-code, codex and
-                                               antigravity-cli support the auto-retrieve hook (pre-inject
-                                               memories before each message); claude-code also has
-                                               a pre-compact hook (snapshot before context compaction).
+  mementos integration hook enable | disable | status <name> [--type=session-start|pre-compact]
+                                               Manage a client's hooks. claude-code and codex
+                                               support the session-start hook (load the curated
+                                               memory index once at conversation start);
+                                               claude-code also has a pre-compact hook (snapshot
+                                               the conversation before context compaction).
 
   mementos share-key                           Transfer the vault key to another device,
                                                either by showing it on screen (mnemonic

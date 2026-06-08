@@ -9,7 +9,8 @@
  */
 import { describe, it, expect } from 'vitest'
 import { createServer, createConnection, type Socket, type AddressInfo } from 'node:net'
-import { runSender, runReceiver, computeSas } from '../cli/_transfer/protocol.js'
+import { runSender, runReceiver, computeSas, computeCommit } from '../cli/_transfer/protocol.js'
+import { randomBytes } from 'node:crypto'
 
 describe('computeSas', () => {
   it('is order-stable — both sides compute the same value regardless of arg order', () => {
@@ -57,6 +58,47 @@ describe('sender ↔ receiver round-trip (localhost TCP)', () => {
 
   it('aborts when the receiver user rejects SAS', async () => {
     await expect(runRoundTrip('secret', (side) => side === 'sender')).rejects.toThrow(/aborting/i)
+  })
+
+  // Regression for the SAS-grinding fix: the receiver must reject a sender
+  // whose revealed public key doesn't match the earlier commitment. Simulates
+  // an active MitM that swaps pubS between the commitment step (1) and the
+  // opening step (3) — the receiver's verification at step 4 catches it
+  // before the SAS is even displayed.
+  it('aborts with a MITM error when the sender\'s opening does not match its commitment', async () => {
+    const { acceptedSocket, clientSocket } = await openSocketPair()
+    try {
+      // Hand-rolled "sender" that commits to one pubkey but reveals another.
+      const fakeSender = async (): Promise<void> => {
+        const pubA = randomBytes(44)  // committed
+        const pubB = randomBytes(44)  // revealed — different
+        const nonce = randomBytes(32)
+        const commitA = computeCommit(pubA, nonce)
+        // step 1: send commit_A
+        await new Promise<void>((resolve, reject) =>
+          acceptedSocket.write(commitA, e => e ? reject(e) : resolve()))
+        // step 2: read peer's pubkey (44 bytes)
+        await new Promise<Buffer>(resolve => {
+          let buf = Buffer.alloc(0)
+          acceptedSocket.on('data', chunk => {
+            buf = Buffer.concat([buf, chunk])
+            if (buf.length >= 44) resolve(buf.subarray(0, 44))
+          })
+        })
+        // step 3: open with pubB ‖ nonce — does NOT match commit_A
+        await new Promise<void>((resolve, reject) =>
+          acceptedSocket.write(Buffer.concat([pubB, nonce]), e => e ? reject(e) : resolve()))
+      }
+
+      // Receiver must reject with the MITM error before the SAS is shown.
+      let sasShown = false
+      const recvP = runReceiver(clientSocket, async () => { sasShown = true; return true })
+      await expect(Promise.all([fakeSender(), recvP])).rejects.toThrow(/man-in-the-middle|commitment/i)
+      expect(sasShown).toBe(false)  // failure precedes any user prompt
+    } finally {
+      acceptedSocket.destroy()
+      clientSocket.destroy()
+    }
   })
 })
 
