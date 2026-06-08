@@ -479,6 +479,7 @@ export class GitBackend implements StorageBackend {
     const heads = await git.raw(['ls-remote', '--heads', 'origin', BRANCH])
     if (heads.trim().length === 0) return
 
+    // ── 1. Pull (existing behavior) ─────────────────────────────────────────
     try {
       await git.pull('origin', BRANCH, ['--rebase', '--autostash'])
     } catch (e) {
@@ -491,6 +492,44 @@ export class GitBackend implements StorageBackend {
         throw new GitRebaseConflictError(conflicted)
       }
       throw e
+    }
+
+    // ── 2. Reconcile orphans (the "sync is bidirectional" half) ─────────────
+    //
+    // The pull above closes the remote→local half. This block closes
+    // local→remote: any versioned files sitting untracked / modified in the
+    // working tree, OR any local commits that are ahead of `origin/<BRANCH>`,
+    // get committed + pushed.
+    //
+    // Why this lives in sync, not in a separate `push` command: "sync"
+    // semantically means "reconcile both sides," so pretending we only do
+    // half of it is a doc lie. The recovery flow this exists for — a stale
+    // daemon wrote files via a different backend instance, a daemon was
+    // killed mid-batch, a remote was transiently unreachable when an earlier
+    // write tried to push — all surface the same way: the working tree is
+    // out of sync with the remote. Letting `sync` reconcile it means no new
+    // CLI command, no `instanceof` checks, no special-case routing. Every
+    // backend's sync() means "make local and remote agree." LocalBackend
+    // stays a no-op (the OS already syncs both ways).
+    //
+    // Runs under the vault WriteLock (every `doSync` call does), so this is
+    // serialised with the daemon's own writes — no race.
+    const status = await git.status()
+    const orphanPaths = [
+      ...status.not_added,
+      ...status.modified,
+      ...status.deleted,
+    ].filter(isVersioned)
+    if (orphanPaths.length > 0) {
+      await git.add(orphanPaths)
+      const summary = orphanPaths.length === 1
+        ? `reconcile ${orphanPaths[0]}`
+        : `reconcile ${orphanPaths.length} orphan files`
+      await this.commitAndPush(`memory: ${summary}`)
+    } else if (status.ahead > 0) {
+      // Nothing untracked, but local commits are ahead of the remote — a
+      // push that failed earlier (transient network) left them behind.
+      await this.pushWithRetry()
     }
   }
 

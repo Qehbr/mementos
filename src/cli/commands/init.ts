@@ -49,6 +49,7 @@ import type { KeyProviderImplementationModule } from '../../keys/registry.js'
 import type { RetrieverImplementationModule } from '../../retrievers/registry.js'
 import { CliInitContext } from '../init-context.js'
 import { requireImpl, refuseIfNonEmpty, runSetupAtInit } from '../_utils/vault.js'
+import { assertNoServerRunning } from '../_utils/assert-no-server.js'
 import { promptChoice, promptChoiceWithBack, promptPath, WizardHeader, BACK, type BackOr, StepCounter } from '../_utils/prompts.js'
 import { dim, checkboxTheme } from '../_utils/style.js'
 import { parseFlag } from '../_utils/flags.js'
@@ -70,6 +71,17 @@ interface InitDeps {
 }
 
 export async function runInit(): Promise<void> {
+  // The daemon caches its StorageBackend / EmbeddingProvider / VectorIndex /
+  // KeyProvider instances at startup. Re-running `init` while the daemon is
+  // alive lets the user change the on-disk config out from under those
+  // cached instances — silently making the running daemon a ghost serving
+  // from a backend that doesn't match the live config. Concrete failure:
+  // `init --reinit` switching storage from local → git, daemon keeps using
+  // its LocalBackend instance, every subsequent ingest writes plain files
+  // that never make it into the git remote. Refuse with a pointer to
+  // `mementos stop` — same guard migrate / restore / destroy already use.
+  await assertNoServerRunning('Init')
+
   const existing = await readMachineConfigOrNull()
 
   if (existing && parseFlag('reinit') === undefined) {

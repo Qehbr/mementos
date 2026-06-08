@@ -120,6 +120,21 @@ describe('migration guards', () => {
     } finally { spy.mockRestore() }
   }, 90_000)
 
+  // init (especially --reinit) rewrites the MachineConfig — but the running
+  // daemon's StorageBackend / KeyProvider / EmbeddingProvider instances are
+  // cached at startup. Re-running init under a live daemon = silent backend
+  // mismatch: change storage from `local` → `git` and the stale `LocalBackend`
+  // daemon keeps writing untracked files to disk that never reach git. Guard
+  // refuses BEFORE any prompt fires.
+  it('init refuses while the daemon is running', async () => {
+    const apiClient = await import('../../daemon/api-client.js')
+    const spy = vi.spyOn(apiClient, 'isDaemonRunning').mockResolvedValue(true)
+    try {
+      const { runInit } = await import('../../cli/commands/init.js')
+      await expect(runInit()).rejects.toBeInstanceOf(ProcessExitError)
+    } finally { spy.mockRestore() }
+  }, 90_000)
+
   it('migrate --abort restores the vault from the backup after an interrupted embedder commit', async () => {
     const { deriveKeyFromEntropy } = await import('../../keys/_utils/derivation/index.js')
     const { encryptMemPayloads, memAad } = await import('../../core/vault/aad.js')

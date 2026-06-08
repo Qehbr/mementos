@@ -1,6 +1,14 @@
 /**
- * Refuse to run a state-mutating CLI command (migrate, restore, destroy)
- * while the daemon is alive. Two distinct failure modes the guard prevents:
+ * Refuse to run a state-mutating CLI command (init, migrate, restore, destroy)
+ * while the daemon is alive. Three distinct failure modes the guard prevents:
+ *
+ *   - init (--reinit): rewrites the on-disk MachineConfig while the running
+ *     daemon still holds its at-startup StorageBackend / EmbeddingProvider /
+ *     KeyProvider / VectorIndex instances. A user switching backend
+ *     `local` → `git` keeps a stale `LocalBackend` daemon serving — every
+ *     subsequent write goes to disk but never to git, silently producing
+ *     17,000 untracked working-tree files. (Real failure that motivated
+ *     adding the guard here.)
  *
  *   - migrate / restore: rewrite `.mem` files (or commit a new key/embedder)
  *     under the live daemon's feet. The daemon holds the in-RAM HNSW index +
