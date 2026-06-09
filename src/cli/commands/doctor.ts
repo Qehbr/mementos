@@ -30,7 +30,8 @@ import { memAad } from '../../core/vault/aad.js'
 import { MEM_EXTENSION } from '../../core/vault/constants.js'
 import { requireImpl, buildKeyProvider, buildStorageBackend, buildStorageAndKey } from '../_utils/vault.js'
 import { readManifest } from '../_utils/migration-manifest.js'
-import { isDaemonRunning } from '../../daemon/api-client.js'
+import { getDaemonState } from '../../daemon/api-client.js'
+import { readDaemonStateFile } from '../../daemon/state.js'
 import { DAEMON_URL, DAEMON_TOKEN_FILE } from '../../daemon/constants.js'
 import type { MachineConfig, VaultConfig } from '../../core/types.js'
 import type { MemFile } from '../../core/vault/types.js'
@@ -302,16 +303,23 @@ async function checkIndexCache(_machine: MachineConfig): Promise<CheckResult> {
 }
 
 async function checkDaemon(): Promise<CheckResult> {
-  const running = await isDaemonRunning()
-  if (!running) {
+  const state = await getDaemonState()
+  if (state === 'absent') {
     return {
       name: 'Daemon', status: 'ok',
       detail: 'not running (informational) — start with `mementos start` to use CLI commands or AI clients',
     }
   }
-  // Verify the token file is present + has the expected `0600` perms — without
-  // it, clients (CLI, shim, hooks) get a clean 401 from the daemon and the user
-  // would otherwise see a confusing "unauthorized" error from `mementos recall`.
+  if (state === 'initializing') {
+    const file = await readDaemonStateFile()
+    const ago = file ? secondsSince(file.startedAt) : '?'
+    return {
+      name: 'Daemon', status: 'ok',
+      detail: `initializing (PID ${file?.pid ?? '?'}, started ${ago}s ago — loading the vault)`,
+      hint: 'large vaults take a minute or two on first start; re-run `mementos doctor` shortly',
+    }
+  }
+  // state === 'ready' — verify the token file is present + 0600.
   try {
     const s = await stat(DAEMON_TOKEN_FILE)
     const mode = s.mode & 0o777
@@ -330,6 +338,12 @@ async function checkDaemon(): Promise<CheckResult> {
     }
   }
   return { name: 'Daemon', status: 'ok', detail: `running at ${DAEMON_URL} (token OK)` }
+}
+
+function secondsSince(iso: string): string {
+  const then = Date.parse(iso)
+  if (Number.isNaN(then)) return '?'
+  return String(Math.max(0, Math.round((Date.now() - then) / 1000)))
 }
 
 async function checkIntegrations(): Promise<CheckResult[]> {

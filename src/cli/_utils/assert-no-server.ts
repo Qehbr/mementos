@@ -32,11 +32,17 @@
  * the daemon binds the port for its full lifetime, and the single-port
  * mutex means at most one daemon ever runs.
  */
-import { isDaemonRunning } from '../../daemon/api-client.js'
+import { getDaemonState } from '../../daemon/api-client.js'
 
 export async function assertNoServerRunning(action: string): Promise<void> {
-  if (!await isDaemonRunning()) return
-  console.error('The mementos daemon is running.')
+  const state = await getDaemonState()
+  if (state === 'absent') return
+  // Refuse for both `ready` AND `initializing` — an initializing daemon is on
+  // its way to owning the same state we're about to mutate. Letting init /
+  // migrate / restore / destroy proceed while a daemon is still loading the
+  // vault would leave the half-loaded daemon's RAM permanently inconsistent
+  // with the rewritten disk.
+  console.error(`The mementos daemon is ${state === 'ready' ? 'running' : 'initializing'}.`)
   console.error(`${action} touches state the daemon owns (vault files, or the daemon's own`)
   console.error('config directory). Stop the daemon first:')
   console.error('  mementos stop')

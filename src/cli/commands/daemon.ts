@@ -5,36 +5,60 @@
  *   `start`        → bind the HTTP API port (`127.0.0.1:47899` by default),
  *                    hold the vault, exit on SIGTERM. `--foreground` keeps
  *                    stdio attached for debugging; otherwise double-fork
- *                    into the background.
- *   `stop`         → read the PID file, send SIGTERM, wait for the port to
- *                    free up. Refuses if no daemon is running.
+ *                    into the background. **Returns as soon as the child
+ *                    has spawned + survived a 1.5s sanity check** — the
+ *                    actual vault load (cold ONNX + decrypt of every `.mem`)
+ *                    can take minutes on large vaults, and there is no
+ *                    point blocking the user's terminal on it. The daemon
+ *                    advertises its state via `~/.config/mementos/daemon.state`;
+ *                    AI clients auto-wait for `ready`, `mementos doctor`
+ *                    reports the live state.
+ *   `stop`         → read the PID out of the state file, send SIGTERM, wait
+ *                    for the port to free up.
  *   `ensureDaemonRunning()` → helper for the auto-start paths (`mementos mcp`,
- *                    hook subprocesses). Returns once the port is reachable.
+ *                    hook subprocesses). Spawns the daemon if needed, then
+ *                    polls the state file for `ready`. The mcp shim passes
+ *                    `timeoutMs: null` (wait forever); hooks keep the default
+ *                    5s budget so they stay fail-soft.
  *
- * The PID file at `~/.config/mementos/daemon.pid` plus the listening port
- * together act as the mutex: any second `mementos start` invocation detects
- * the live port and refuses.
+ * The listening port is the single-instance mutex (`assertPortFree` inside
+ * `startHttpApi`); the state file is best-effort diagnostic info that the
+ * port-bind makes race-safe (only the winning daemon ever writes it).
  */
 import { spawn } from 'node:child_process'
-import { readFile } from 'node:fs/promises'
-import { safeUnlink } from '../../core/_utils/fs.js'
 import { fileURLToPath } from 'node:url'
 import { dirname, resolve as resolvePath } from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
 import { runDaemon } from '../../daemon/runner.js'
-import { isDaemonRunning } from '../../daemon/api-client.js'
-import { DAEMON_PID_FILE, DAEMON_URL, AUTOSTART_TIMEOUT_MS, AUTOSTART_POLL_INTERVAL_MS } from '../../daemon/constants.js'
+import { getDaemonState } from '../../daemon/api-client.js'
+import {
+  readDaemonStateFile, deleteDaemonStateFile, isProcessAlive,
+} from '../../daemon/state.js'
+import {
+  DAEMON_URL, SPAWN_SANITY_CHECK_MS, AUTOSTART_POLL_INTERVAL_MS,
+} from '../../daemon/constants.js'
 import { parseFlag } from '../_utils/flags.js'
 
+/** Default budget for `ensureDaemonRunning` callers that need a bound. Hooks. */
+const DEFAULT_ENSURE_TIMEOUT_MS = 5_000
 
 /**
  * `mementos start [--foreground]` — run the daemon. Without `--foreground`,
- * double-forks so the user gets their shell back immediately. With it, blocks
- * on stdio for debugging (logs visible, Ctrl-C kills cleanly).
+ * double-forks and returns as soon as the child has survived a brief
+ * sanity check (no hanging while the vault loads).
  */
 export async function runStart(): Promise<void> {
-  if (await isDaemonRunning()) {
+  const state = await getDaemonState()
+  if (state === 'ready') {
     console.error(`mementos daemon already running at ${DAEMON_URL}.`)
+    process.exit(1)
+  }
+  if (state === 'initializing') {
+    const file = await readDaemonStateFile()
+    const ago = file ? secondsSince(file.startedAt) : '?'
+    console.error(`mementos daemon already initializing (PID ${file?.pid}, started ${ago}s ago).`)
+    console.error('Wait for it to finish — large vaults take a minute or two on first start —')
+    console.error('or run `mementos stop` to abort and retry.')
     process.exit(1)
   }
 
@@ -44,101 +68,98 @@ export async function runStart(): Promise<void> {
     return
   }
 
-  // Detached background mode. Re-spawn ourselves with --foreground, then exit
-  // so the user gets their shell back. The child inherits no stdio, so its
-  // output doesn't bleed into the parent terminal — `mementos doctor` is how
-  // the user checks "is it running?", not "did stdout say so?".
-  spawnDaemonDetached()
+  // Detached background mode. Spawn, sanity-check, return. The daemon's own
+  // startup may take minutes on large vaults; we don't wait for `ready` here.
+  const pid = spawnDaemonDetached()
 
-  // Wait for the child to bind the port so the user knows it's actually up.
-  // If it doesn't appear within the timeout, the child probably failed to start
-  // (vault not initialised, key unreachable, …) — point at the foreground flag
-  // for debugging instead of silently leaving them with no daemon.
-  const ok = await waitForDaemon(AUTOSTART_TIMEOUT_MS)
-  if (!ok) {
-    console.error(`mementos start: daemon did not start within ${AUTOSTART_TIMEOUT_MS}ms.`)
-    console.error('  Run `mementos start --foreground` to see the startup error.')
+  await delay(SPAWN_SANITY_CHECK_MS)
+  if (!isProcessAlive(pid)) {
+    console.error(`mementos start: daemon process (PID ${pid}) exited within ${SPAWN_SANITY_CHECK_MS}ms.`)
+    console.error('Run `mementos start --foreground` to see the startup error.')
     process.exit(1)
   }
-  console.log(`mementos daemon started (at ${DAEMON_URL}).`)
+
+  console.log(`mementos daemon spawning (PID ${pid}).`)
+  console.log('Large vaults take a minute or two on first start (cold embedder load + decrypt).')
+  console.log('AI clients auto-wait. Check status with: mementos doctor')
 }
 
 /**
- * `mementos stop` — read the PID file, send SIGTERM, wait for the socket to
- * disappear, then unlink the PID file (the daemon's own shutdown also unlinks
- * it; this is the belt for if the daemon was killed -9).
+ * `mementos stop` — read the PID out of the state file, send SIGTERM, wait
+ * for the port to release. Tolerates stale state files (PID dead).
  */
 export async function runStop(): Promise<void> {
-  let pid: number
-  try {
-    pid = Number((await readFile(DAEMON_PID_FILE, 'utf8')).trim())
-  } catch (e) {
-    if ((e as NodeJS.ErrnoException).code === 'ENOENT') {
-      console.error('mementos stop: no daemon running (no PID file).')
-      process.exit(1)
-    }
-    throw e
-  }
-  if (!Number.isInteger(pid) || pid <= 0) {
-    console.error(`mementos stop: malformed PID file at ${DAEMON_PID_FILE}.`)
-    process.exit(1)
-  }
-
-  // Probe the daemon port BEFORE killing — `isDaemonRunning` is the
-  // authoritative liveness signal (the daemon binds the port for its full
-  // lifetime, releases it on graceful shutdown). The PID file alone is not
-  // enough: the daemon unlinks its own PID on graceful shutdown, so a stale
-  // PID file means the daemon was killed -9 OR crashed AND the OS may have
-  // since recycled the PID to an unrelated process. Sending SIGTERM to that
-  // recycled PID would kill the wrong program. The port probe closes the
-  // dangerous case for free — no daemon listening, PID file is stale, clean
-  // it up and exit.
-  if (!await isDaemonRunning()) {
-    await safeUnlink(DAEMON_PID_FILE)
-    console.error('mementos stop: no daemon running (PID file was stale; cleaned up).')
+  const file = await readDaemonStateFile()
+  if (!file) {
+    // Either no state file at all OR the file's PID is dead. Either way:
+    // no daemon to stop. Clean up any stale file and exit informatively.
+    await deleteDaemonStateFile()
+    console.error('mementos stop: no daemon running.')
     process.exit(1)
   }
 
   try {
-    process.kill(pid, 'SIGTERM')
+    process.kill(file.pid, 'SIGTERM')
   } catch (e) {
     if ((e as NodeJS.ErrnoException).code === 'ESRCH') {
-      console.error(`mementos stop: PID ${pid} no longer running (stale PID file).`)
-      await safeUnlink(DAEMON_PID_FILE)
+      // Process died between readDaemonStateFile and kill — race-tolerant cleanup.
+      await deleteDaemonStateFile()
+      console.error(`mementos stop: PID ${file.pid} no longer running (cleaned up).`)
       process.exit(1)
     }
     throw e
   }
 
-  // Wait for the daemon to release the port. If it doesn't within the
-  // timeout, we still report success — the SIGTERM was delivered.
-  const deadline = Date.now() + AUTOSTART_TIMEOUT_MS
+  // Wait for the daemon to flip the state file to absent. If it doesn't
+  // within the timeout, we still report success — the SIGTERM was delivered.
+  const deadline = Date.now() + DEFAULT_ENSURE_TIMEOUT_MS
   while (Date.now() < deadline) {
-    if (!await isDaemonRunning()) {
-      console.log(`mementos daemon stopped (PID ${pid}).`)
+    if ((await getDaemonState()) === 'absent') {
+      console.log(`mementos daemon stopped (PID ${file.pid}).`)
       return
     }
     await delay(AUTOSTART_POLL_INTERVAL_MS)
   }
-  console.log(`mementos stop: SIGTERM sent to PID ${pid}, but the daemon is still live (may be flushing).`)
+  console.log(`mementos stop: SIGTERM sent to PID ${file.pid}; daemon may still be flushing.`)
 }
 
 /**
- * Spawn a daemon if none is running, then wait for the port to be reachable.
- * Used by `mementos mcp` (the stdio MCP shim AI clients launch) and by hook
+ * Spawn a daemon if none is running, then wait for it to be `ready`. Used by
+ * `mementos mcp` (the stdio MCP shim AI clients launch) and by hook
  * subprocesses. Idempotent — if a daemon is already up, returns immediately.
  *
- * If the daemon can't start within the timeout, throws — the caller decides
- * whether to surface the failure (hooks: fail-soft; mcp: AI client sees it).
+ * `timeoutMs`:
+ *   - `undefined` (default) → 5s budget. Hooks pass this; if startup is
+ *     genuinely slow, fail-soft and skip the hook this turn.
+ *   - `null`                → wait forever. The mcp shim passes this; tool
+ *     calls are what the AI client wants, blocking is correct.
+ *   - a number              → custom budget (mostly for tests).
+ *
+ * Throws when the budget expires (callers decide whether to surface that).
  */
-export async function ensureDaemonRunning(): Promise<void> {
-  if (await isDaemonRunning()) return
-  spawnDaemonDetached()
-  const ok = await waitForDaemon(AUTOSTART_TIMEOUT_MS)
-  if (!ok) throw new Error(`mementos daemon did not start within ${AUTOSTART_TIMEOUT_MS}ms — try \`mementos start --foreground\` to see the error.`)
+export async function ensureDaemonRunning(
+  opts: { timeoutMs?: number | null } = {},
+): Promise<void> {
+  const initialState = await getDaemonState()
+  if (initialState === 'ready') return
+
+  if (initialState === 'absent') spawnDaemonDetached()
+  // If initialState was 'initializing', a daemon is already coming up — we
+  // just need to wait for it. Don't spawn a second one.
+
+  const budget = opts.timeoutMs === undefined ? DEFAULT_ENSURE_TIMEOUT_MS : opts.timeoutMs
+  const ok = await waitForReady(budget)
+  if (!ok) {
+    throw new Error(
+      budget === null
+        ? 'mementos daemon never became ready (still polling). This should be unreachable.'
+        : `mementos daemon did not become ready within ${budget}ms — ` +
+          'try `mementos start --foreground` to see the startup error.',
+    )
+  }
 }
 
-function spawnDaemonDetached(): void {
+function spawnDaemonDetached(): number {
   const cliEntry = resolvePath(dirname(fileURLToPath(import.meta.url)), '..', 'index.js')
   const child = spawn(process.execPath, [cliEntry, 'start', '--foreground'], {
     detached: true,
@@ -146,14 +167,32 @@ function spawnDaemonDetached(): void {
     env: process.env,
   })
   child.unref()
+  // `child.pid` is set synchronously after a successful `spawn()`. Cast is
+  // safe — Node only returns undefined when the spawn failed to launch, in
+  // which case the next line in runStart's poll path would catch the dead PID.
+  return child.pid as number
 }
 
-async function waitForDaemon(timeoutMs: number): Promise<boolean> {
-  const deadline = Date.now() + timeoutMs
-  while (Date.now() < deadline) {
-    if (await isDaemonRunning()) return true
+/**
+ * Poll the state file until `ready` (or the budget runs out).
+ * `timeoutMs: null` means wait forever (mcp shim).
+ *
+ * Also catches the "still initializing but PID just died" case — the state
+ * file's PID becomes a dead PID → `daemonState()` returns `absent` →
+ * we'd never see `ready`. We give up at the budget (or, for `null`, the
+ * caller can Ctrl-C; the daemon's logs will say what went wrong).
+ */
+async function waitForReady(timeoutMs: number | null): Promise<boolean> {
+  const deadline = timeoutMs === null ? null : Date.now() + timeoutMs
+  while (deadline === null || Date.now() < deadline) {
+    if ((await getDaemonState()) === 'ready') return true
     await delay(AUTOSTART_POLL_INTERVAL_MS)
   }
   return false
 }
 
+function secondsSince(iso: string): string {
+  const then = Date.parse(iso)
+  if (Number.isNaN(then)) return '?'
+  return String(Math.max(0, Math.round((Date.now() - then) / 1000)))
+}

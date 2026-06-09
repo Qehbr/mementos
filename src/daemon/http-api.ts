@@ -39,6 +39,13 @@ import { DAEMON_HOST, DAEMON_PORT, MAX_REQUEST_BODY_BYTES } from './constants.js
 export interface HttpApiServer {
   /** Stop accepting new connections; resolve once the OS releases the port. */
   close(): Promise<void>
+  /**
+   * Flip the server from `initializing` to `ready`. Until called, every
+   * request (including `/api/_meta/info`) returns 503 with a
+   * `{error: "daemon initializing"}` body. `runDaemon` calls this once
+   * `vault.startup()` resolves.
+   */
+  markReady(): void
 }
 
 const INGEST_BODY = z.object({
@@ -64,7 +71,26 @@ export async function startHttpApi(vault: Vault, opts: StartOpts): Promise<HttpA
   const tools = activeTools({ searchEnabled: opts.searchEnabled })
   const version = packageVersion()
 
+  // Initially false — every request returns 503 until `markReady()` flips it.
+  // The runner binds the port BEFORE calling vault.startup(), so the
+  // initializing window is the slow vault-load window.
+  let ready = false
+
   const server: HttpServer = createHttpServer((req, res) => {
+    // Gate every request on `ready` first, before auth even. Auth requires
+    // the token file to have been written, and the token file is only
+    // written AFTER vault.startup() completes — so during init the auth
+    // check would always fail with 401, which is wrong (it's a state
+    // problem, not an auth problem). 503 with a clear message + Retry-After
+    // is the honest answer.
+    if (!ready) {
+      res.writeHead(503, {
+        'content-type': 'application/json',
+        'retry-after': '1',
+      })
+      res.end(JSON.stringify({ error: 'daemon initializing', state: 'initializing' }))
+      return
+    }
     void handle(req, res, vault, tools, opts, version).catch(e => {
       if (process.env['MEMENTOS_DEBUG']) console.error('[daemon] handler:', (e as Error).stack ?? (e as Error).message)
       if (!res.headersSent) {
@@ -85,6 +111,7 @@ export async function startHttpApi(vault: Vault, opts: StartOpts): Promise<HttpA
   })
 
   return {
+    markReady: () => { ready = true },
     close: () => new Promise<void>(resolve => {
       // `server.close()` stops accepting new connections and waits for
       // every existing one to end — including IDLE keep-alive sockets,

@@ -5,7 +5,7 @@
  *      commands fail with a clear message instead of a cryptic decrypt error.
  *   2. `mementos migrate` refuses while the daemon (`mementos start`) is running —
  *      a live daemon holds a stale key/config/embedder and would corrupt a migration.
- *      Liveness is the TCP probe in `assertNoServerRunning` → `isDaemonRunning`.
+ *      Liveness is the state-file check in `assertNoServerRunning` → `getDaemonState`.
  *   3. `mementos migrate --abort` restores the vault from the backup when a key/embedder
  *      commit was interrupted mid-flight.
  */
@@ -82,11 +82,10 @@ describe('migration guards', () => {
 
   it('migrate refuses while the daemon is running', async () => {
     // Pretend a daemon is up. `assertNoServerRunning` reads its signal from
-    // `isDaemonRunning()` (a TCP probe of the daemon port); spying on the
-    // module export gives us a synchronous "true" without needing to start
-    // a real daemon in the test process.
+    // `getDaemonState()`; spying on the module export gives us a synchronous
+    // 'ready' answer without needing to start a real daemon in the test process.
     const apiClient = await import('../../daemon/api-client.js')
-    const spy = vi.spyOn(apiClient, 'isDaemonRunning').mockResolvedValue(true)
+    const spy = vi.spyOn(apiClient, 'getDaemonState').mockResolvedValue('ready')
     try {
       process.argv = ['node', 'mementos', 'migrate']
       const { runMigrate } = await import('../../cli/commands/migrate.js')
@@ -99,7 +98,7 @@ describe('migration guards', () => {
   // assertNoServerRunning helper must refuse — same posture as migrate.
   it('restore refuses while the daemon is running', async () => {
     const apiClient = await import('../../daemon/api-client.js')
-    const spy = vi.spyOn(apiClient, 'isDaemonRunning').mockResolvedValue(true)
+    const spy = vi.spyOn(apiClient, 'getDaemonState').mockResolvedValue('ready')
     try {
       const { runRestore } = await import('../../cli/commands/backup.js')
       // Path doesn't have to exist — the guard fires before the directory check.
@@ -113,7 +112,7 @@ describe('migration guards', () => {
   // must refuse BEFORE the interactive checkbox is shown.
   it('destroy refuses while the daemon is running', async () => {
     const apiClient = await import('../../daemon/api-client.js')
-    const spy = vi.spyOn(apiClient, 'isDaemonRunning').mockResolvedValue(true)
+    const spy = vi.spyOn(apiClient, 'getDaemonState').mockResolvedValue('ready')
     try {
       const { runDestroy } = await import('../../cli/commands/destroy.js')
       await expect(runDestroy()).rejects.toBeInstanceOf(ProcessExitError)
@@ -128,10 +127,25 @@ describe('migration guards', () => {
   // refuses BEFORE any prompt fires.
   it('init refuses while the daemon is running', async () => {
     const apiClient = await import('../../daemon/api-client.js')
-    const spy = vi.spyOn(apiClient, 'isDaemonRunning').mockResolvedValue(true)
+    const spy = vi.spyOn(apiClient, 'getDaemonState').mockResolvedValue('ready')
     try {
       const { runInit } = await import('../../cli/commands/init.js')
       await expect(runInit()).rejects.toBeInstanceOf(ProcessExitError)
+    } finally { spy.mockRestore() }
+  }, 90_000)
+
+  // Race-safety: a daemon that's still INITIALIZING (port bound, vault loading)
+  // is on its way to owning the same state we'd mutate. Letting init / migrate /
+  // restore / destroy proceed against an initializing daemon would leave the
+  // half-loaded daemon's RAM permanently inconsistent with the rewritten disk.
+  // The guard must refuse the same way it does for `ready`.
+  it('migrate refuses while the daemon is initializing (not just when ready)', async () => {
+    const apiClient = await import('../../daemon/api-client.js')
+    const spy = vi.spyOn(apiClient, 'getDaemonState').mockResolvedValue('initializing')
+    try {
+      process.argv = ['node', 'mementos', 'migrate']
+      const { runMigrate } = await import('../../cli/commands/migrate.js')
+      await expect(runMigrate()).rejects.toBeInstanceOf(ProcessExitError)
     } finally { spy.mockRestore() }
   }, 90_000)
 

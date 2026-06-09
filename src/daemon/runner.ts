@@ -1,22 +1,34 @@
 /**
- * Daemon main loop — builds the vault, **claims the port first** (the real
- * mutex), then writes the PID + token files. Parks waiting for SIGTERM.
+ * Daemon main loop.
  *
- * (`mementos migrate / restore / destroy` use the same port-bind as their
- * own liveness signal via `assertNoServerRunning` → `isDaemonRunning`.
- * There is no separate PID-file registry — the listening port for the
- * daemon's full lifetime IS the registration.)
+ * Order of operations (chosen so the on-disk state file CANNOT race two
+ * simultaneously-spawning daemons):
  *
- * **Why this order matters**: `ensureDaemonRunning` can race two callers
- * (e.g. an MCP shim and a hook subprocess firing nearly simultaneously) into
- * spawning two `mementos start` processes back-to-back. The top-of-start
- * `isDaemonRunning()` probe is TOCTOU — both children pass it. The port-bind
- * inside `startHttpApi` is the actual single-instance guarantee
- * (`assertPortFree`). If we wrote the PID / token files BEFORE binding, the
- * losing daemon would overwrite the winner's files and then exit on port
- * conflict, leaving every client reading a stale token → 401 against the
- * live daemon (i.e. wedged and unreachable). Binding first means the loser
- * exits having touched nothing shared.
+ *   1. `buildVault()`            — fast; just constructs deps.
+ *   2. `startHttpApi(ready=false)` — **binds the port** via
+ *      `assertPortFree` + `server.listen()`. The OS-level port mutex is the
+ *      race-safety primitive: a losing daemon-start exits HERE, before
+ *      writing anything to disk.
+ *   3. Write `daemon.state` with `state: 'initializing'` — we have already
+ *      won the port-bind, so there is no other writer.
+ *   4. `vault.startup()`         — slow (cold ONNX, decrypt all `.mem`,
+ *      build HNSW). Every HTTP request during this window returns 503.
+ *   5. `vault.seedIndexIfMissing()` — idempotent placeholder seed.
+ *   6. `api.markReady()`         — flip the handler from 503 → real routing.
+ *   7. Write `daemon.state` with `state: 'ready'`.
+ *   8. Write the bearer token file (`0600`).
+ *
+ * The order also avoids a SECOND class of race the prior audit closed:
+ * if PID / token had been written BEFORE the port bind, a losing daemon
+ * could overwrite the winner's token file → every client reads a stale
+ * token → 401 against the live daemon. Binding first means the loser
+ * exits at step 2 having touched nothing shared.
+ *
+ * **Why two state-file writes (not one)** — readers care about the
+ * distinction. During step 4 the daemon is alive on the port but every
+ * request 503s; the state file at that moment reflects that honestly so
+ * `mementos doctor` can report "initializing (PID N, started Xs ago)"
+ * instead of lying.
  *
  * Used by `mementos start` (and indirectly by `mementos mcp` and the hook
  * subprocesses, both of which spawn `mementos start --foreground` detached
@@ -24,13 +36,11 @@
  *
  * Returns once a shutdown signal arrives and the vault has flushed cleanly.
  */
-import { writeFile, unlink, mkdir } from 'node:fs/promises'
-import { dirname } from 'node:path'
 import { buildVault } from '../cli/_utils/vault.js'
 import { readMachineConfig } from '../core/config.js'
 import { startHttpApi } from './http-api.js'
-import { DAEMON_PID_FILE } from './constants.js'
 import { generateToken, writeTokenFile, deleteToken } from './token.js'
+import { writeDaemonStateFile, deleteDaemonStateFile } from './state.js'
 
 export async function runDaemon(): Promise<void> {
   const vault = await buildVault()
@@ -43,42 +53,42 @@ export async function runDaemon(): Promise<void> {
     if (process.env['MEMENTOS_DEBUG']) console.error('[daemon] unhandled rejection:', err.stack ?? err.message)
   })
 
+  // Generate the token in memory only — DON'T touch the disk yet.
+  const token = generateToken()
+
+  // ── Step 1+2 (above): bind the port. THIS is the single-instance mutex.
+  // Returns the HTTP API with `ready=false`; every request returns 503 until
+  // we call `api.markReady()` further down.
+  const machine = await readMachineConfig()
+  const searchEnabled = machine.searcher !== 'none'
+  const api = await startHttpApi(vault, { searchEnabled, token })
+
+  // ── Step 3: write the state file. Safe — port-bind succeeded, no second writer.
+  const startedAt = new Date().toISOString()
+  await writeDaemonStateFile('initializing', startedAt)
+
+  // ── Step 4: slow vault load. Clients during this window get 503 with
+  // {error: "daemon initializing"} — they (e.g. the mcp shim's
+  // `ensureDaemonRunning`) poll the state file and wait for `ready`.
   await vault.startup().catch((e: Error) => {
     console.error(e.message)
     process.exit(1)
   })
 
-  // Seed the singleton `_index` placeholder if absent. Idempotent — O(1) hashmap
-  // check on the common case (already seeded). Lives here, not in `mementos init`,
-  // so the slow first call (embedder cold-start) doesn't block the init wizard
-  // AND existing vaults that pre-date the invariant heal themselves on next start.
-  //
-  // Fail-soft is justified here: vault.startup() already succeeded on the same
-  // storage + key + embedder path, so a `seedIndexIfMissing` failure means
-  // something transient and outside our control (filesystem hiccup, slow embed
-  // batch). The `_index` is a UX convenience, not load-bearing for the daemon —
-  // the next write_memento on the same code path will surface the same error
-  // loudly. Letting the daemon boot anyway is better than refusing to serve.
+  // ── Step 5: lazy `_index` seed. Fail-soft (see comment) — vault.startup()
+  // already proved the storage + key + embedder paths work, so a failure
+  // here is transient. The next write_memento surfaces it loudly anyway.
   await vault.seedIndexIfMissing().catch((e: Error) => {
     if (process.env['MEMENTOS_DEBUG']) console.error('[daemon] index seed skipped:', e.message)
   })
 
-  // Generate the token in memory only — DON'T touch the disk yet.
-  const token = generateToken()
+  // ── Step 6+7: flip the HTTP handler to live, update the state file.
+  api.markReady()
+  await writeDaemonStateFile('ready', startedAt)
 
-  // Bind the port. THIS is the single-instance mutex. If something is already
-  // listening, `assertPortFree` inside `startHttpApi` throws and we exit
-  // without having touched the shared PID / token files.
-  const machine = await readMachineConfig()
-  const searchEnabled = machine.searcher !== 'none'
-  const api = await startHttpApi(vault, { searchEnabled, token })
-
-  // Port is ours. Safe to publish the token + PID. If either fails we still
-  // own the port; the shutdown handler below will clean up on SIGTERM. (None
-  // of these writes should fail in practice — same user's HOME, perms
-  // already established by `init`.)
-  await mkdir(dirname(DAEMON_PID_FILE), { recursive: true }).catch(() => { /* parent may exist */ })
-  await writeFile(DAEMON_PID_FILE, String(process.pid), 'utf8')
+  // ── Step 8: publish the token. Done AFTER markReady so a client polling
+  // the state file (`ready`) and then trying to authenticate always finds
+  // the token in place — no race where state says ready but token is missing.
   await writeTokenFile(token)
 
   // Park until a shutdown signal arrives. The handler awaits vault.close() so
@@ -93,7 +103,7 @@ export async function runDaemon(): Promise<void> {
         .catch(() => { /* fail-soft on shutdown */ })
         .finally(async () => {
           await deleteToken()
-          await unlink(DAEMON_PID_FILE).catch(() => { /* already gone */ })
+          await deleteDaemonStateFile()
           resolve()
         })
     }

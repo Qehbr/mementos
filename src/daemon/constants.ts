@@ -32,16 +32,34 @@ export const DAEMON_URL = `http://${DAEMON_HOST}:${DAEMON_PORT}`
 /** Bytes of randomness in the bearer token (`hex` => 64 chars). 256 bits. */
 export const TOKEN_BYTES = 32
 
-/** PID file path — written by daemon at startup, read by `mementos stop`. */
-export const DAEMON_PID_FILE = join(homedir(), '.config', 'mementos', 'daemon.pid')
+/**
+ * Daemon state file — JSON `{pid, state, startedAt}`. Written by `runDaemon`
+ * AFTER the port-bind has succeeded (so the OS-level port mutex guarantees
+ * exactly one writer); updated again when the vault has finished loading
+ * (state `initializing` → `ready`); deleted on graceful shutdown.
+ *
+ * Replaces the older `daemon.pid` file, which only carried the PID. The
+ * state file is the canonical source for "is a daemon up, and is it ready?"
+ * checks — readers verify the PID is alive (`kill(pid, 0)`) before trusting
+ * it, so a crash-leftover stale file is treated as "absent."
+ */
+export const DAEMON_STATE_FILE = join(homedir(), '.config', 'mementos', 'daemon.state')
 
 /** Bearer-token file path — written `0600` by daemon at startup, read by clients. */
 export const DAEMON_TOKEN_FILE = join(homedir(), '.config', 'mementos', 'daemon.token')
 
-/** How long the auto-start paths (`mementos mcp`, hooks) wait for the daemon to come up. */
-export const AUTOSTART_TIMEOUT_MS = 5_000
+/**
+ * Brief sanity-check window after `mementos start` spawns a detached daemon —
+ * if the child process hasn't survived this long, we declare it failed.
+ * This catches immediate failures (missing config, port snatched between
+ * probe and spawn). Slow-but-fine startups (cold ONNX load + decrypt of a
+ * 100k-memento vault) stay alive past 1.5s and we return success — actual
+ * "ready" is no longer waited on at `mementos start` time; callers check via
+ * `mementos doctor` or simply use the AI client which auto-waits.
+ */
+export const SPAWN_SANITY_CHECK_MS = 1_500
 
-/** Poll interval while waiting for the daemon to bind its port. */
+/** Poll interval while waiting for the daemon to flip from `initializing` to `ready`. */
 export const AUTOSTART_POLL_INTERVAL_MS = 50
 
 /**

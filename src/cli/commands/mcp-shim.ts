@@ -40,7 +40,12 @@ export async function runMcp(): Promise<void> {
     process.exit(1)
   }
 
-  await ensureDaemonRunning()
+  // `timeoutMs: null` = wait forever for the daemon to become ready. The
+  // shim's whole job is forwarding tool calls; blocking until the daemon
+  // can serve them is correct. On a large vault's first start that wait
+  // can be a minute or two — the AI client is OK with a slow first tool
+  // call, NOT with a setup error.
+  await ensureDaemonRunning({ timeoutMs: null })
 
   const info = await getDaemonInfo()
   const tools = activeTools({ searchEnabled: info.searchEnabled })
