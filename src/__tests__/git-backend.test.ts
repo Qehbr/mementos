@@ -265,6 +265,12 @@ describe('GitBackend', () => {
     const memPath = join(local, 'wedge-test.mem')
     const { writeFileSync } = await import('node:fs')
     writeFileSync(memPath, 'data')
+    // Set identity on this clone — CI runners often have no global git
+    // user.email/name, and unlike the other tests we commit via raw git
+    // here (not through simple-git's commit path which evidently has a
+    // fallback). Matches the seed-repo setup at the top of this file.
+    git(['config', 'user.email', 'test@test.com'], local)
+    git(['config', 'user.name', 'Test'], local)
     git(['add', 'wedge-test.mem'], local)
     git(['commit', '-m', 'memory: wedge-test', '--no-gpg-sign'], local)
 
