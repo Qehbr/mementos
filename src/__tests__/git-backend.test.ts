@@ -247,6 +247,43 @@ describe('GitBackend', () => {
     const { data } = await b.get('with-key.mem')
     expect(data).toEqual(Buffer.from('hello'))
   })
+
+  // Regression test for the Fable 5 audit finding: sync's "if ahead > 0
+  // then pushWithRetry" branch used to call pushWithRetry which called
+  // sync() between attempts, which would re-enter the same branch — a
+  // mutual recursion that never terminated when the push persistently
+  // failed but the pull succeeded (read-only deploy key, archived repo,
+  // protected branch, …). Hangs the daemon under the WriteLock forever
+  // and survives SIGTERM. Bound: sync MUST throw within seconds, not
+  // recurse.
+  it('sync throws within the 3-attempt cap when the remote rejects pushes (no mutual recursion)', async () => {
+    const b = await makeBackend(local)
+    // Stage a local commit that's not on the remote yet, so sync's
+    // pushWithRetry path is the one we exercise. Using raw git rather
+    // than b.put so we don't immediately push — that way sync()'s own
+    // "ahead > 0" path is the actor.
+    const memPath = join(local, 'wedge-test.mem')
+    const { writeFileSync } = await import('node:fs')
+    writeFileSync(memPath, 'data')
+    git(['add', 'wedge-test.mem'], local)
+    git(['commit', '-m', 'memory: wedge-test', '--no-gpg-sign'], local)
+
+    // Now install a pre-receive hook on the bare repo that rejects every
+    // push. The hook script must be executable.
+    const hookPath = join(bare, 'hooks', 'pre-receive')
+    writeFileSync(hookPath, '#!/bin/sh\nexit 1\n')
+    execFileSync('chmod', ['+x', hookPath])
+
+    // The contract: sync must throw within bounded time. With the bug
+    // (pushWithRetry → sync → pushWithRetry mutual recursion), this hangs
+    // forever; vitest's per-test timeout would surface the hang as a
+    // failure. A 5s assertion-side cap is generous — the real bound is
+    // 200ms + 600ms + epsilon = under 1s before the third attempt throws.
+    const start = Date.now()
+    await expect(b.sync()).rejects.toThrow()
+    const elapsed = Date.now() - start
+    expect(elapsed).toBeLessThan(5_000)
+  }, 10_000)
 })
 
 describe('parseRemote', () => {

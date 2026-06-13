@@ -67,36 +67,40 @@ export async function runRestore(dir: string | undefined): Promise<void> {
     console.error('Usage: mementos restore <backup-dir>')
     process.exit(1)
   }
-  await assertNoServerRunning('Restore')
-  await refuseIfMigrating()
   const machine = await readMachineConfigOrExit()
   if (!await pathExists(dir)) {
     console.error(`Backup directory not found: ${dir}`)
     process.exit(1)
   }
+  // Refuse if a real migration is in progress — read BEFORE the fence so
+  // we don't mistake our own preflight for a pending migration.
+  await refuseIfMigrating()
 
-  const storage = await storageFor(machine)
-  // Same TOCTOU as `mementos migrate` — between `assertNoServerRunning` and
-  // `applyVaultFiles`, a hook / mcp shim could auto-start a daemon that
-  // caches the current state and races our overwrite. The window here is
-  // much smaller (no user prompts), but the fix is identical: install the
-  // preflight manifest so any daemon spawned in the window fails `buildVault`
-  // and exits.
-  await withMigrationFence(() => applyVaultFiles(storage, dir))
-  console.log(`Restored the vault from ${dir}.`)
+  // Wrap from BEFORE assertNoServerRunning + storage.init (git clone/pull
+  // for git backends), not just around applyVaultFiles. The earlier order
+  // left a seconds-wide window where a hook-spawned daemon would pass
+  // assertNoServerRunning AND its own buildVault manifest check, then
+  // race our overwrite. The key probe stays inside too so any daemon
+  // auto-started while we read files for the warning still bounces.
+  await withMigrationFence(async () => {
+    await assertNoServerRunning('Restore')
+    const storage = await storageFor(machine)
+    await applyVaultFiles(storage, dir)
+    console.log(`Restored the vault from ${dir}.`)
 
-  // Warn (don't fail) if the restored files don't open under the active key — that means
-  // the backup was taken under a different key; the user needs that key to read them.
-  if (!machine.keyProvider) return
-  const key = await (await buildKeyProvider(machine)).getKey().catch(() => null)
-  if (!key) return
-  for (const f of await storage.list()) {
-    const { data } = await storage.get(f)
-    if (!canDecryptMem(data, key)) {
-      console.warn('Warning: the restored files do not decrypt under the current vault key.')
-      console.warn('They were encrypted under a different key — switch to that key (or run')
-      console.warn('`mementos migrate --type=key`) to make the vault readable.')
-      return
+    // Warn (don't fail) if the restored files don't open under the active key — that means
+    // the backup was taken under a different key; the user needs that key to read them.
+    if (!machine.keyProvider) return
+    const key = await (await buildKeyProvider(machine)).getKey().catch(() => null)
+    if (!key) return
+    for (const f of await storage.list()) {
+      const { data } = await storage.get(f)
+      if (!canDecryptMem(data, key)) {
+        console.warn('Warning: the restored files do not decrypt under the current vault key.')
+        console.warn('They were encrypted under a different key — switch to that key (or run')
+        console.warn('`mementos migrate --type=key`) to make the vault readable.')
+        return
+      }
     }
-  }
+  })
 }

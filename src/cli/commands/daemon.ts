@@ -143,18 +143,19 @@ export async function ensureDaemonRunning(
   const initialState = await getDaemonState()
   if (initialState === 'ready') return
 
-  if (initialState === 'absent') spawnDaemonDetached()
-  // If initialState was 'initializing', a daemon is already coming up — we
-  // just need to wait for it. Don't spawn a second one.
+  // Capture the spawned PID so `waitForReady` can detect a spawn that died
+  // (PID-liveness is an exact signal — no timing guess about how long
+  // buildVault should take). If `initialState` was `initializing`, someone
+  // else is already coming up; we just observe and don't spawn a second one.
+  const spawnedPid = initialState === 'absent' ? spawnDaemonDetached() : undefined
 
   const budget = opts.timeoutMs === undefined ? DEFAULT_ENSURE_TIMEOUT_MS : opts.timeoutMs
-  const ok = await waitForReady(budget)
+  const ok = await waitForReady(budget, spawnedPid)
   if (!ok) {
     throw new Error(
-      budget === null
-        ? 'mementos daemon never became ready (still polling). This should be unreachable.'
-        : `mementos daemon did not become ready within ${budget}ms — ` +
-          'try `mementos start --foreground` to see the startup error.',
+      'mementos daemon failed to start — try `mementos start --foreground` to see the startup error. ' +
+      'Common causes: a pending migration manifest (run `mementos migrate` or `--abort`), ' +
+      'a broken config, or an unreachable key provider.',
     )
   }
 }
@@ -174,18 +175,36 @@ function spawnDaemonDetached(): number {
 }
 
 /**
- * Poll the state file until `ready` (or the budget runs out).
- * `timeoutMs: null` means wait forever (mcp shim).
+ * Poll the state file until `ready` (or we conclude the spawn died).
  *
- * Also catches the "still initializing but PID just died" case — the state
- * file's PID becomes a dead PID → `daemonState()` returns `absent` →
- * we'd never see `ready`. We give up at the budget (or, for `null`, the
- * caller can Ctrl-C; the daemon's logs will say what went wrong).
+ * `timeoutMs: null` means wait forever for a slow `initializing` daemon
+ * — the mcp shim passes this because tool calls genuinely want to block.
+ * The failure-detection signal in that mode is `spawnedPid`: if state is
+ * `absent` AND the spawned PID is dead, the daemon's buildVault failed
+ * (stale manifest after kill mid-migration, the migration-fence path,
+ * broken config, …) and no further waiting will help.
+ *
+ * Using PID liveness instead of a timing window means we never
+ * false-positive on a legitimately-slow buildVault (cold dynamic imports,
+ * slow disk, big plugin set) where the state file just hasn't been
+ * written yet — the PID is still alive, so we keep waiting.
+ *
+ * The bounded-budget case still throws on budget expiry as before.
  */
-async function waitForReady(timeoutMs: number | null): Promise<boolean> {
+async function waitForReady(timeoutMs: number | null, spawnedPid?: number): Promise<boolean> {
   const deadline = timeoutMs === null ? null : Date.now() + timeoutMs
   while (deadline === null || Date.now() < deadline) {
-    if ((await getDaemonState()) === 'ready') return true
+    const state = await getDaemonState()
+    if (state === 'ready') return true
+    // Wait-forever-mode failure detection: the spawned PID is dead AND
+    // the state file is absent — buildVault threw before writing state.
+    // (If state is `initializing`, daemonState already verified the
+    // state-file's PID is alive; if that PID dies later, the next poll
+    // would return `absent` and the same check fires.)
+    if (timeoutMs === null && state === 'absent'
+        && spawnedPid !== undefined && !isProcessAlive(spawnedPid)) {
+      return false
+    }
     await delay(AUTOSTART_POLL_INTERVAL_MS)
   }
   return false

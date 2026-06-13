@@ -14,15 +14,24 @@
  *   4. `vault.startup()`         — slow (cold ONNX, decrypt all `.mem`,
  *      build HNSW). Every HTTP request during this window returns 503.
  *   5. `vault.seedIndexIfMissing()` — idempotent placeholder seed.
- *   6. `api.markReady()`         — flip the handler from 503 → real routing.
- *   7. Write `daemon.state` with `state: 'ready'`.
- *   8. Write the bearer token file (`0600`).
+ *   6. Write the bearer token file (`0600`) — BEFORE markReady so it cannot
+ *      race a client that polled the state file, saw `ready`, and then
+ *      reads the token.
+ *   7. `api.markReady()`         — flip the handler from 503 → real routing.
+ *   8. Write `daemon.state` with `state: 'ready'`.
  *
  * The order also avoids a SECOND class of race the prior audit closed:
  * if PID / token had been written BEFORE the port bind, a losing daemon
  * could overwrite the winner's token file → every client reads a stale
  * token → 401 against the live daemon. Binding first means the loser
  * exits at step 2 having touched nothing shared.
+ *
+ * THIRD class of race (closed at step 6 above): if the token were written
+ * AFTER `state: 'ready'`, a client polling the state file (`waitForReady`)
+ * would briefly see `ready` while the token file was still missing — read
+ * ENOENT and bail out with "no mementos daemon running" against a daemon
+ * that IS running. Writing the token first means `state: 'ready'` strictly
+ * implies the token is on disk.
  *
  * **Why two state-file writes (not one)** — readers care about the
  * distinction. During step 4 the daemon is alive on the port but every
@@ -82,14 +91,19 @@ export async function runDaemon(): Promise<void> {
     if (process.env['MEMENTOS_DEBUG']) console.error('[daemon] index seed skipped:', e.message)
   })
 
-  // ── Step 6+7: flip the HTTP handler to live, update the state file.
+  // ── Step 6: publish the token BEFORE the state file flips to `ready`.
+  // The 503 gate keeps the handler returning 503 to everyone right now, so
+  // nothing observes the token yet — and once `state: 'ready'` lands at
+  // step 8, the token is strictly already in place. (Writing it AFTER step
+  // 8 — the earlier order, despite a comment claiming otherwise — created
+  // a real race where waitForReady's 50ms poll could see `ready` and then
+  // hit ENOENT on the token file, bouncing clients with
+  // "no mementos daemon running" against a live daemon.)
+  await writeTokenFile(token)
+
+  // ── Step 7+8: flip the HTTP handler to live, update the state file.
   api.markReady()
   await writeDaemonStateFile('ready', startedAt)
-
-  // ── Step 8: publish the token. Done AFTER markReady so a client polling
-  // the state file (`ready`) and then trying to authenticate always finds
-  // the token in place — no race where state says ready but token is missing.
-  await writeTokenFile(token)
 
   // Park until a shutdown signal arrives. The handler awaits vault.close() so
   // the encrypted HNSW cache flushes — a SIGINT in the middle of a write

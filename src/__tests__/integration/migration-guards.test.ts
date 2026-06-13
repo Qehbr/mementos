@@ -149,6 +149,74 @@ describe('migration guards', () => {
     } finally { spy.mockRestore() }
   }, 90_000)
 
+  // Pins the load-bearing fix from the Fable 5 audit: the preflight fence
+  // MUST be on disk BEFORE `assertNoServerRunning` runs (and before any
+  // network / keychain work that follows it in the real flow). If a
+  // refactor moves the fence after the assert, a daemon auto-started by a
+  // hook in the seconds-wide pre-fence window passes BOTH guards —
+  // assertNoServerRunning saw no daemon, the daemon's own buildVault
+  // manifest check saw no fence — and caches the old key while the
+  // migration commit rewrites every .mem under the new one.
+  //
+  // Test strategy: spy on `getDaemonState` (the inner of
+  // `assertNoServerRunning`). At the moment that spy fires, read the
+  // manifest file from disk and assert the preflight has already been
+  // written. Spying on `writeManifest` itself doesn't work — withMigrationFence
+  // calls it internally within its own module, so the ESM export spy doesn't
+  // intercept. The on-disk observation is the real contract anyway.
+  it('migrate writes the preflight fence BEFORE checking the daemon (regression: Fable 5 TOCTOU)', async () => {
+    const manifestModule = await import('../../cli/_utils/migration-manifest.js')
+    const apiClient = await import('../../daemon/api-client.js')
+
+    let manifestStateAtDaemonCheck: 'preflight' | 'absent' | 'other' = 'absent'
+    const getDaemonStateSpy = vi.spyOn(apiClient, 'getDaemonState').mockImplementation(async () => {
+      const m = await manifestModule.readManifest().catch(() => null)
+      if (m === null) manifestStateAtDaemonCheck = 'absent'
+      else if (m.type === 'preflight') manifestStateAtDaemonCheck = 'preflight'
+      else manifestStateAtDaemonCheck = 'other'
+      return 'ready'  // exit the migrate path early via assertNoServerRunning
+    })
+    try {
+      process.argv = ['node', 'mementos', 'migrate']
+      const { runMigrate } = await import('../../cli/commands/migrate.js')
+      await expect(runMigrate()).rejects.toBeInstanceOf(ProcessExitError)
+      expect(manifestStateAtDaemonCheck).toBe('preflight')
+    } finally {
+      getDaemonStateSpy.mockRestore()
+      await manifestModule.deleteManifest().catch(() => { /* ENOENT-tolerant */ })
+    }
+  }, 90_000)
+
+  // Same regression for `init --reinit`: the wizard runs for minutes, and
+  // a hook-spawned daemon mid-wizard would boot from the still-valid
+  // pre-wizard MachineConfig and become the ghost-daemon failure 7b6eeba
+  // closed. The fence must wrap the wizard body — observable as: by the
+  // time the wizard reaches its first registry load, the fence is on disk.
+  it('init --reinit writes the preflight fence BEFORE the wizard body runs (regression: Fable 5)', async () => {
+    const manifestModule = await import('../../cli/_utils/migration-manifest.js')
+    const storageReg = await import('../../storage/registry.js')
+
+    let manifestStateAtBody: 'preflight' | 'absent' | 'other' = 'absent'
+    const loadSpy = vi.spyOn(storageReg, 'loadStorageBackends').mockImplementation(async () => {
+      // The first registry load inside the wizard body. If the fence is
+      // wrapping the body, the preflight manifest must already be on disk.
+      const m = await manifestModule.readManifest().catch(() => null)
+      if (m === null) manifestStateAtBody = 'absent'
+      else if (m.type === 'preflight') manifestStateAtBody = 'preflight'
+      else manifestStateAtBody = 'other'
+      throw new Error('test abort — observation done')
+    })
+    try {
+      process.argv = ['node', 'mementos', 'init', '--reinit']
+      const { runInit } = await import('../../cli/commands/init.js')
+      await runInit().catch(() => { /* expected — we threw out of the spy */ })
+      expect(manifestStateAtBody).toBe('preflight')
+    } finally {
+      loadSpy.mockRestore()
+      await manifestModule.deleteManifest().catch(() => { /* ENOENT-tolerant */ })
+    }
+  }, 90_000)
+
   it('migrate --abort restores the vault from the backup after an interrupted embedder commit', async () => {
     const { deriveKeyFromEntropy } = await import('../../keys/_utils/derivation/index.js')
     const { encryptMemPayloads, memAad } = await import('../../core/vault/aad.js')

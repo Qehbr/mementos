@@ -92,9 +92,13 @@ const getTags: ToolDef<Record<string, never>> = {
 }
 
 const sync: ToolDef<Record<string, never>> = {
-  description: 'Pull the latest memories from storage right now. Call when the user says a memory should exist but recall or get_memento came up empty — it may have been written on another device since the last auto-sync.',
+  description: 'Reconcile this device with storage in BOTH directions: pull any new memories written on other devices AND push any local commits or untracked memory files that haven\'t reached the remote. Call when the user says a memory should exist but recall or get_memento came up empty — it may have been written on another device since the last auto-sync.',
   inputSchema: {},
-  annotations: { readOnlyHint: true, openWorldHint: true, idempotentHint: true },
+  // No readOnlyHint: GitBackend.sync commits and pushes untracked / unpushed
+  // state to the user's remote. MCP clients use these hints for permission
+  // gating; auto-approving this as a read tool would bypass write gating
+  // for a network mutation.
+  annotations: { openWorldHint: true, idempotentHint: true },
   handler: async vault => {
     const counts = formatSyncCounts(await vault.sync())
     return counts === null

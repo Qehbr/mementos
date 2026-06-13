@@ -62,23 +62,32 @@ export async function runMigrate(): Promise<void> {
     process.exit(1)
   }
 
-  await assertNoServerRunning('Migration')
-  await assertKeyReachable(machine)
-  await syncSourceVault(machine)
-
+  // Read any pre-existing manifest BEFORE we write our own preflight fence,
+  // so the resume branch sees a real in-progress migration rather than the
+  // preflight we are about to install.
   const pending = await readManifest()
   if (pending) {
-    // Resume / abort flow doesn't need a fresh fence — the existing manifest
-    // IS the fence (buildVault already refuses on it).
+    // Resume / abort flow: existing manifest already fences daemon spawns.
+    await assertNoServerRunning('Migration')
+    await assertKeyReachable(machine)
     validateManifestPaths(pending, machine.vaultPath)
     await resumeOrAbort(machine, pending)
     return
   }
 
-  // Fresh migration: install the preflight fence BEFORE any prompt so a
-  // daemon auto-started by a hook / mcp shim during the interactive window
-  // can't cache the old key and race the commit. See `withMigrationFence`.
+  // Fresh migration: install the preflight fence FIRST, around every other
+  // slow step (assertKeyReachable can prompt the keychain; syncSourceVault
+  // does a network git pull; the prompts that follow are minutes-wide).
+  // Without the fence around these, a daemon auto-started by a hook or MCP
+  // shim during the window passes BOTH guards — assertNoServerRunning saw
+  // no daemon, the daemon's buildVault manifest check saw no fence — and
+  // ends up caching the old key while the commit rewrites every `.mem`
+  // under the new one.
   await withMigrationFence(async () => {
+    await assertNoServerRunning('Migration')
+    await assertKeyReachable(machine)
+    await syncSourceVault(machine)
+
     const ctx = new CliInitContext()
     const type = await promptType()
     switch (type) {

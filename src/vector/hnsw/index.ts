@@ -212,6 +212,21 @@ export class HNSWIndex implements VectorIndex {
     this.unindexMemento(id, numId)
   }
 
+  /**
+   * Tombstone every chunk for `mementoId`. We snapshot the numId list before
+   * the loop because `unindexMemento` mutates `mementoIdToNumIds[mementoId]`
+   * during iteration (the last removal deletes the entry entirely).
+   */
+  removeMemento(mementoId: string): void {
+    const numIds = this.mementoIdToNumIds.get(mementoId)
+    if (!numIds) return
+    for (const numId of [...numIds]) {
+      const key = this.numToStr.get(numId)
+      if (key === undefined) continue
+      this.remove(key)
+    }
+  }
+
   async serialize(): Promise<Buffer> {
     // hnswlib only does file I/O; the tmp file holds plaintext vectors, cleaned up on exit.
     return withTempFile('hnsw', async tmp => {

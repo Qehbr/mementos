@@ -474,25 +474,8 @@ export class GitBackend implements StorageBackend {
   }
 
   async sync(): Promise<void> {
+    if (!await this.pullRemote()) return
     const git = await this.git()
-    // ls-remote: empty stdout = empty remote (fresh repo, no main yet) → skip pull.
-    const heads = await git.raw(['ls-remote', '--heads', 'origin', BRANCH])
-    if (heads.trim().length === 0) return
-
-    // ── 1. Pull (existing behavior) ─────────────────────────────────────────
-    try {
-      await git.pull('origin', BRANCH, ['--rebase', '--autostash'])
-    } catch (e) {
-      // Map a rebase-conflicted working tree to the typed error — the caller's standard
-      // stale-read retry applies instead of leaving git mid-rebase.
-      const status = await git.status().catch(() => null)
-      if (status && status.conflicted.length > 0) {
-        const conflicted = [...status.conflicted]
-        await git.raw(['rebase', '--abort']).catch(() => { /* best effort */ })
-        throw new GitRebaseConflictError(conflicted)
-      }
-      throw e
-    }
 
     // ── 2. Reconcile orphans (the "sync is bidirectional" half) ─────────────
     //
@@ -678,11 +661,47 @@ export class GitBackend implements StorageBackend {
   }
 
   /**
+   * Pull-only half of the bidirectional `sync()`. Returns `false` for an
+   * empty remote (fresh repo, no main branch yet) so `sync()` can skip its
+   * push-side reconciliation too. Throws `GitRebaseConflictError` on a
+   * conflicted working tree.
+   *
+   * Exists as a private split from `sync()` so `pushWithRetry` can
+   * reconcile non-fast-forward failures between attempts WITHOUT
+   * re-entering the push half — which would create a mutual recursion
+   * (`pushWithRetry → sync → pushWithRetry`) on a persistently-failing push
+   * whose pull succeeds, defeating the documented 3-attempt bound and
+   * wedging the daemon under the WriteLock.
+   */
+  private async pullRemote(): Promise<boolean> {
+    const git = await this.git()
+    const heads = await git.raw(['ls-remote', '--heads', 'origin', BRANCH])
+    if (heads.trim().length === 0) return false
+    try {
+      await git.pull('origin', BRANCH, ['--rebase', '--autostash'])
+    } catch (e) {
+      // Map a rebase-conflicted working tree to the typed error — the caller's standard
+      // stale-read retry applies instead of leaving git mid-rebase.
+      const status = await git.status().catch(() => null)
+      if (status && status.conflicted.length > 0) {
+        const conflicted = [...status.conflicted]
+        await git.raw(['rebase', '--abort']).catch(() => { /* best effort */ })
+        throw new GitRebaseConflictError(conflicted)
+      }
+      throw e
+    }
+    return true
+  }
+
+  /**
    * Push to origin with bounded exponential backoff (200ms, 600ms; max 3 attempts).
-   * Re-syncs between attempts so non-fast-forward failures from a concurrent peer push
-   * resolve without operator intervention. A sync between attempts can throw
-   * `GitRebaseConflictError` on an unrelated file; falls through to rollback and recovers
-   * on the next sync.
+   * Re-pulls between attempts so non-fast-forward failures from a concurrent peer push
+   * resolve without operator intervention. The re-pull is `pullRemote()` rather than
+   * `sync()` — calling `sync()` would re-enter `pushWithRetry` (sync's push-side
+   * reconciliation), so a persistently-failing push whose pull always succeeds would
+   * mutual-recurse forever inside the WriteLock and never reach the attempt cap.
+   * A pull between attempts can throw `GitRebaseConflictError` on an unrelated file;
+   * falls through to rollback and recovers on the next sync.
    */
   private async pushWithRetry(maxAttempts = 3): Promise<void> {
     const git = await this.git()
@@ -694,7 +713,7 @@ export class GitBackend implements StorageBackend {
         if (attempt === maxAttempts - 1) throw e
         const wait = 200 * Math.pow(3, attempt)
         await new Promise(r => setTimeout(r, wait))
-        await this.sync()
+        await this.pullRemote()
       }
     }
   }

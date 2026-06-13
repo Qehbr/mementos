@@ -16,8 +16,10 @@
  * clock-dependent reference like the cache file's own mtime — so a cross-device update
  * that lands with an older mtime (the writing device's clock runs behind) is still caught.
  *
- * AAD-bound to the id-set: replaying an older valid cache (same key, different IVs, all
- * auth tags valid) fails GCM authentication because the AAD differs.
+ * AAD-bound to the sorted `(id, mtimeMs)` set: replaying an older valid cache (different
+ * id-set OR a swap-back after an in-place update) fails GCM authentication because the AAD
+ * differs. Binding mtimes — not just ids — is what catches the swap-after-update attack:
+ * forging `entries[i].mtimeMs` to match the on-disk file now also invalidates the AAD.
  */
 import { readFile, writeFile, mkdir } from 'node:fs/promises'
 import { pathExists } from '../_utils/fs.js'
@@ -37,9 +39,9 @@ export interface CacheEntry {
 
 /**
  * Wire format of the cache file. `entries` is plaintext — the `.mem` filenames are already
- * plaintext, so this leaks nothing extra. Tampering with `entries` is bounded: at worst it
- * forces an unnecessary rebuild, since the encrypted `data` is AAD-bound to the sorted id
- * set and forging the ids invalidates authentication.
+ * plaintext, and the mtimes leak nothing the file system doesn't already expose. Tampering
+ * with `entries` is bounded: the encrypted `data` is AAD-bound to the sorted `(id, mtimeMs)`
+ * set, so forging either an id OR an mtime invalidates authentication and the cache rebuilds.
  */
 export interface IndexCache {
   entries: CacheEntry[]
@@ -88,8 +90,8 @@ export async function tryLoadIndexCache(
       if (onDisk.get(e.id) !== e.mtimeMs) return null
     }
 
-    // cacheAad canonicalises internally — no pre-sort needed.
-    const indexData = decrypt(cache.data, key, cacheAad(entries.map(e => e.id)))
+    // cacheAad canonicalises (sorts by id) internally — no pre-sort needed.
+    const indexData = decrypt(cache.data, key, cacheAad(entries))
     // No init() before load() — VectorIndex.load is required to fully construct internal
     // state from the serialized blob. HNSWIndex.load builds a fresh HierarchicalNSW; an
     // earlier init() would just allocate a 100k-element index and discard it.
@@ -118,7 +120,7 @@ export async function saveIndexCache(
     const indexData = await index.serialize()
     const cache: IndexCache = {
       entries,
-      data: encrypt(indexData, key, cacheAad(entries.map(e => e.id))),
+      data: encrypt(indexData, key, cacheAad(entries)),
     }
     await mkdir(dirname(cachePath), { recursive: true })
     await writeFile(cachePath, Buffer.from(JSON.stringify(cache)))

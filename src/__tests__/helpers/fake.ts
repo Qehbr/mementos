@@ -127,6 +127,12 @@ export class BruteForceIndex implements VectorIndex {
 
   remove(id: string) { this.points.delete(id) }
 
+  removeMemento(mementoId: string): void {
+    for (const id of [...this.points.keys()]) {
+      if (mementoIdOf(id) === mementoId) this.points.delete(id)
+    }
+  }
+
   async serialize(): Promise<Buffer> {
     const entries: [string, number[]][] = []
     for (const [id, vec] of this.points) entries.push([id, Array.from(vec)])

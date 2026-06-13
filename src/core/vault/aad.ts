@@ -56,11 +56,18 @@ export function memAad(id: string, field: MemField): Buffer {
 }
 
 /**
- * AAD for the encrypted HNSW cache. Binds the ciphertext to its sorted id-set: replaying
- * an older valid cache (different id-set, same key) fails authentication.
+ * AAD for the encrypted HNSW cache. Binds the ciphertext to its sorted
+ * `(id, mtimeMs)` set — not the id-set alone. Binding ids only is enough
+ * to catch adds and deletes (the set changes), but NOT in-place updates:
+ * an attacker with disk write can swap an old cache back, forge the
+ * plaintext `entries[i].mtimeMs` to match the on-disk file (the freshness
+ * check trusts the unauthenticated plaintext mtimes), and the AAD —
+ * built from ids alone — still authenticates. Binding mtimes too means
+ * any forged mtime fails GCM authentication and the cache is rebuilt.
  */
-export function cacheAad(ids: string[]): Buffer {
-  return Buffer.from(JSON.stringify({ kind: 'index-cache', ids: [...ids].sort() }), 'utf8')
+export function cacheAad(entries: ReadonlyArray<{ id: string; mtimeMs: number }>): Buffer {
+  const sorted = [...entries].sort((a, b) => a.id.localeCompare(b.id))
+  return Buffer.from(JSON.stringify({ kind: 'index-cache', entries: sorted }), 'utf8')
 }
 
 /**

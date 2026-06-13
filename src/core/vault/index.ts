@@ -85,10 +85,12 @@ export class DuplicateMementoError extends Error {
 }
 
 /**
- * Thrown when a write_memento call attempts to create a second memento with the
- * reserved `_index` tag. The vault holds exactly one canonical index memento;
- * the AI updates it via `update_memento(<existing id>)`. The error message
- * surfaces the existing id so the AI can pivot in one round-trip.
+ * Thrown when ANY write path attempts to attach the reserved `_index` tag to a
+ * memento other than the single canonical index memento — `write_memento`'s
+ * tags array, `update_memento`'s tags-replace, or `ingest`'s opts.tags. The
+ * vault holds exactly one canonical index memento; the AI updates it via
+ * `update_memento(<existing id>)`. The error message surfaces the existing id
+ * so the AI can pivot in one round-trip.
  */
 export class ReservedIndexTagError extends Error {
   readonly name = 'ReservedIndexTagError'
@@ -184,9 +186,27 @@ export class Vault {
       : null
 
     if (cachedMtimes) {
+      // The cache restored every memento's chunks into the index. Now each
+      // .mem is re-authenticated. A failure here means the cache and disk
+      // disagree on security-relevant content (silent bit-rot, or on-disk
+      // tampering with mtime preserved via `touch -r`) — the .mem fails
+      // GCM auth, so registerMemento is skipped (metaById doesn't get an
+      // entry for it), but the cache.load already put its chunks into the
+      // index. Without reconciliation, recall would rank the orphan via
+      // HNSW and then crash on readMemento's re-authentication. We track
+      // the failed ids and tombstone their chunks below, keeping the
+      // "index ↔ metaById in lockstep" invariant.
+      const cacheAuthFailures: string[] = []
       await Promise.all(memFiles.map(f =>
-        this.loadAndRegister(f, false, cachedMtimes.get(idFromMemFilename(f))),
+        this.loadAndRegister(f, false, cachedMtimes.get(idFromMemFilename(f)), cacheAuthFailures),
       ))
+      if (cacheAuthFailures.length > 0) {
+        for (const id of cacheAuthFailures) this.deps.index.removeMemento(id)
+        // The cache file on disk still claims these chunks belong to the
+        // index — overwrite it on the next flush so a future restart
+        // doesn't try to restore the same phantoms.
+        this.cacheDirty = true
+      }
     } else {
       await this.deps.index.init()
       await Promise.all(memFiles.map(f => this.loadAndRegister(f, true)))
@@ -303,15 +323,30 @@ export class Vault {
     }
   }
 
-  /** Failures are logged and skipped — one bad file can't abort the whole vault. */
+  /**
+   * Failures are logged and skipped — one bad file can't abort the whole vault.
+   *
+   * `cacheAuthFailures`, when provided, accumulates the ids of every file
+   * the cache-hit branch couldn't authenticate — INCLUDING ENOENT. The
+   * benign-ENOENT rule that `warnLoadFailure` uses (don't print a warning
+   * for files that vanished between listing and load) does NOT apply to
+   * orphan tracking: on the cache-hit path the cache already restored
+   * that file's chunks into the index, and a sync-client-delivered
+   * deletion during the multi-second startup window would leave permanent
+   * phantom chunks that survive every future restart (every cache flush
+   * re-serializes them, every cache load re-restores them). The id MUST
+   * land in cacheAuthFailures so startup can tombstone them.
+   */
   private async loadAndRegister(
     filename: string, addToIndex: boolean, knownMtimeMs?: number,
+    cacheAuthFailures?: string[],
   ): Promise<void> {
     try {
       const { mem, chunks, meta } = await this.loadAndAuthenticate(filename)
       const mtimeMs = knownMtimeMs ?? (await this.deps.storage.stat(filename).catch(() => ({ mtimeMs: 0 }))).mtimeMs
       this.registerMemento(mem, chunks, meta, mtimeMs, { addToIndex })
     } catch (e) {
+      if (cacheAuthFailures) cacheAuthFailures.push(idFromMemFilename(filename))
       this.warnLoadFailure(filename, e)
     }
   }
@@ -568,6 +603,16 @@ export class Vault {
       if (m.parentMementoId !== undefined) validateId(m.parentMementoId)
     }
 
+    // Reserved-tag guard: ingest stamps `opts.tags` on every memento it
+    // creates. A `_index` tag here would attach it to N new mementos at
+    // once, irreversibly breaking the singleton invariant. Unlike write/
+    // update we can't pivot to an existing id — ingest is bulk, with no
+    // single "the one you meant to update" — so refuse outright.
+    if (opts.tags?.includes(INDEX_TAG)) {
+      const existingIndexId = this.findIndexMementoId()
+      throw new ReservedIndexTagError(existingIndexId ?? '<no current index>')
+    }
+
     const seen = new Set<string>()
     let skipped = 0
     const fresh: typeof mementos = []
@@ -778,6 +823,19 @@ export class Vault {
   }
 
   private async doUpdateMemento(id: string, text: string, tags?: string[]): Promise<WriteOutcome> {
+    // Reserved-tag guard: an update with `tags` containing `_index` would
+    // silently attach the index tag to an arbitrary memento, breaking the
+    // "exactly one canonical index memento" invariant that
+    // findIndexMementoId + updateMemoryIndex rely on (the latter rewrites
+    // the lowest-sorted carrier's text wholesale → would clobber user
+    // data on next update_memory_index call).
+    if (tags?.includes(INDEX_TAG)) {
+      const existingIndexId = this.findIndexMementoId()
+      if (existingIndexId !== null && existingIndexId !== id) {
+        throw new ReservedIndexTagError(existingIndexId)
+      }
+    }
+
     // Optimistic-concurrency: the etag captures pre-edit file state, paired
     // with `ifMatch` on the put so a concurrent device's sync between our
     // read and our write surfaces as StaleMementoError instead of silently

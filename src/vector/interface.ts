@@ -47,6 +47,16 @@ export interface VectorIndex {
   /** Remove an id. Implementations may use tombstones internally — that's an implementation detail. */
   remove(id: string): void
 
+  /**
+   * Remove every chunk belonging to `mementoId`. Used at startup to reconcile a
+   * cache-hit / disk-state divergence: when a .mem file fails authentication
+   * after the cache restored its chunks into the index, the orphan chunks
+   * must be removed so search / recall can't return an id that no longer
+   * authenticates. Implementations track memento → chunk mapping internally
+   * (required for filteredSearch). Idempotent for unknown memento ids.
+   */
+  removeMemento(mementoId: string): void
+
   /** Serialize the entire index (including any internal id maps) to a buffer for caching. */
   serialize(): Promise<Buffer>
 

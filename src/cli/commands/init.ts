@@ -50,6 +50,7 @@ import type { RetrieverImplementationModule } from '../../retrievers/registry.js
 import { CliInitContext } from '../init-context.js'
 import { requireImpl, refuseIfNonEmpty, runSetupAtInit } from '../_utils/vault.js'
 import { assertNoServerRunning } from '../_utils/assert-no-server.js'
+import { withMigrationFence } from '../_utils/migration-manifest.js'
 import { promptChoice, promptChoiceWithBack, promptPath, WizardHeader, BACK, type BackOr, StepCounter } from '../_utils/prompts.js'
 import { dim, checkboxTheme } from '../_utils/style.js'
 import { parseFlag } from '../_utils/flags.js'
@@ -97,36 +98,52 @@ export async function runInit(): Promise<void> {
     process.exit(1)
   }
 
-  const [storageReg, embedderReg, indexReg, keyReg, retrieverReg, searcherReg, integrationReg] = await Promise.all([
-    loadStorageBackends(),
-    loadEmbedders(),
-    loadVectorIndexes(),
-    loadKeyProviders(),
-    loadRetrievers(),
-    loadSearchers(),
-    loadIntegrations(),
-  ])
+  const body = async (): Promise<void> => {
+    const [storageReg, embedderReg, indexReg, keyReg, retrieverReg, searcherReg, integrationReg] = await Promise.all([
+      loadStorageBackends(),
+      loadEmbedders(),
+      loadVectorIndexes(),
+      loadKeyProviders(),
+      loadRetrievers(),
+      loadSearchers(),
+      loadIntegrations(),
+    ])
 
-  const ctx = new CliInitContext()
-  printBanner()
-  ctx.print('encrypted AI memory vault')
-  if (existing) {
-    ctx.print('Existing vault detected — re-init will refresh configs and integrations,')
-    ctx.print('but will NOT regenerate the vault key (your memories stay readable).')
+    const ctx = new CliInitContext()
+    printBanner()
+    ctx.print('encrypted AI memory vault')
+    if (existing) {
+      ctx.print('Existing vault detected — re-init will refresh configs and integrations,')
+      ctx.print('but will NOT regenerate the vault key (your memories stay readable).')
+    }
+    ctx.print('Press Enter to accept the [default] for any choice.\n')
+
+    // --reinit always means "new vault flow against existing setup" — switching to join
+    // mode mid-vault doesn't have a meaningful preserve-data semantic. Forcing 'new' here
+    // (rather than re-prompting) makes the reinit path predictable.
+    const mode: Mode = existing
+      ? 'new'
+      : await promptMode()
+
+    if (mode === 'new') {
+      await runInitNew({ ctx, existing, storageReg, embedderReg, indexReg, keyReg, retrieverReg, searcherReg, integrationReg })
+    } else {
+      await runInitJoin({ ctx, existing, storageReg, embedderReg, indexReg, keyReg, retrieverReg, searcherReg, integrationReg })
+    }
   }
-  ctx.print('Press Enter to accept the [default] for any choice.\n')
 
-  // --reinit always means "new vault flow against existing setup" — switching to join
-  // mode mid-vault doesn't have a meaningful preserve-data semantic. Forcing 'new' here
-  // (rather than re-prompting) makes the reinit path predictable.
-  const mode: Mode = existing
-    ? 'new'
-    : await promptMode()
-
-  if (mode === 'new') {
-    await runInitNew({ ctx, existing, storageReg, embedderReg, indexReg, keyReg, retrieverReg, searcherReg, integrationReg })
+  // `--reinit` against an existing vault runs a multi-minute wizard, then
+  // rewrites MachineConfig. The t=0 `assertNoServerRunning` above can't see
+  // a daemon spawned MID-wizard by a hook in an open editor; that daemon
+  // would boot against the still-valid pre-wizard config and become the
+  // ghost-daemon failure mode 7b6eeba was meant to close. The preflight
+  // fence makes any such spawn fail its `buildVault` cleanly. Fresh init
+  // doesn't need the fence — no MachineConfig means buildVault refuses
+  // on its own.
+  if (existing) {
+    await withMigrationFence(body)
   } else {
-    await runInitJoin({ ctx, existing, storageReg, embedderReg, indexReg, keyReg, retrieverReg, searcherReg, integrationReg })
+    await body()
   }
 }
 

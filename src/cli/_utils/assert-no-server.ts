@@ -28,9 +28,11 @@
  * to an external directory), so a live daemon doesn't create the
  * RAM-vs-disk skew the guard prevents.
  *
- * The TCP probe on the daemon port is the authoritative liveness signal —
- * the daemon binds the port for its full lifetime, and the single-port
- * mutex means at most one daemon ever runs.
+ * Liveness is read from the state file (`getDaemonState`) — set by the
+ * daemon AFTER it binds the port. A daemon mid-`buildVault` (between
+ * spawn and port-bind) is NOT yet visible here; for that race, the
+ * preflight migration fence is the actual closure (see `withMigrationFence`),
+ * and the state-mutating commands install it BEFORE calling this guard.
  */
 import { getDaemonState } from '../../daemon/api-client.js'
 
