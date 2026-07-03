@@ -8,8 +8,8 @@
     "mementos": "dist/cli/index.js"
   },
   "scripts": {
-    "build": "rm -rf dist && tsc && chmod +x dist/cli/index.js",
-    "clean": "rm -rf dist",
+    "build": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\" && tsc && node -e \"require('node:fs').chmodSync('dist/cli/index.js',0o755)\"",
+    "clean": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\"",
     "dev": "tsx src/cli/index.ts",
     "test": "vitest run",
     "test:watch": "vitest",
