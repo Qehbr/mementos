@@ -13,6 +13,8 @@ npm install
 npm test       # vitest — full suite, in-process
 ```
 
+The first `npm test` also installs the optional native backends (`hnswlib-node`, `re2`, `simple-git`, …) into `~/.config/mementos/plugins/` — the same on-demand location the product itself uses — so it needs a network and a C++ toolchain once. Daemon tests bind ephemeral ports; a live mementos daemon on your machine doesn't interfere with the suite.
+
 ---
 
 ## The auto-discovery contract
