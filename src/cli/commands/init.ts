@@ -262,7 +262,11 @@ async function runInitNew(deps: InitDeps): Promise<void> {
 
   ctx.print('')
 
-  for (const impl of [storageImpl, embedderImpl, indexImpl, retrieverImpl, searcherImpl, keyImpl]) {
+  // Index/retriever/searcher setups run BEFORE the embedder's: they are quick
+  // npm installs of native code — the likeliest first-run failure (missing C++
+  // toolchain) — while the embedder setup may download a ~150 MB model.
+  // Failing in seconds beats failing after minutes of download.
+  for (const impl of [storageImpl, indexImpl, retrieverImpl, searcherImpl, embedderImpl, keyImpl]) {
     await runSetupAtInit(impl, ctx)
   }
 
@@ -380,7 +384,6 @@ async function runInitJoin(deps: InitDeps): Promise<void> {
   const embedderType = adopted.embedder
 
   const embedderImpl = requireImpl(embedderReg, embedderType, 'embedder')
-  await runSetupAtInit(embedderImpl, ctx)
 
   // Step 3 (embedder) is auto-adopted from vault.json — no prompt. Steps 4-7
   // are the remaining choices. The header still paints so the user sees
@@ -403,6 +406,9 @@ async function runInitJoin(deps: InitDeps): Promise<void> {
   await runSetupAtInit(indexImpl, ctx)
   await runSetupAtInit(retrieverImpl, ctx)
   await runSetupAtInit(searcherImpl, ctx)
+  // Embedder setup last of the installs — quick native installs fail fast
+  // before its ~150 MB model download (same ordering as runInitNew).
+  await runSetupAtInit(embedderImpl, ctx)
 
   const provider = keyImpl.create()
   let keptExisting = false

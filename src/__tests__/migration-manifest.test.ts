@@ -8,6 +8,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { mkdtemp, rm, writeFile, mkdir } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
+import { setFakeHome } from './_utils/fake-home.js'
 import { join } from 'node:path'
 import {
   readManifest, writeManifest, deleteManifest, manifestFile,
@@ -16,17 +17,15 @@ import {
 
 describe('migration-manifest helper', () => {
   let homeDir: string
-  let origHome: string | undefined
+  let restoreHome: () => void
 
   beforeEach(async () => {
     homeDir = await mkdtemp(join(tmpdir(), 'migration-manifest-'))
-    origHome = process.env['HOME']
-    process.env['HOME'] = homeDir
+    restoreHome = setFakeHome(homeDir)
   })
 
   afterEach(async () => {
-    if (origHome === undefined) delete process.env['HOME']
-    else process.env['HOME'] = origHome
+    restoreHome()
     await rm(homeDir, { recursive: true, force: true })
   })
 

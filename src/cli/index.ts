@@ -13,6 +13,7 @@
  * and export `type` + `create` (and optionally `setupAtInit`). The CLI scans those folders
  * at runtime to find what's available.
  */
+import './_utils/assert-node-version.js'
 import { runInit } from './commands/init.js'
 import {
   runSessionStart,
@@ -158,7 +159,10 @@ Usage:
     --index=hnsw
     --retriever=semantic|hybrid
     --searcher=scan|trigram|none
-    --key=keychain|env
+    --key=keychain|env      'env' reads MEMENTOS_RAW_KEY (base64-encoded 32
+                            bytes). Pre-export it for fully scripted init;
+                            otherwise init generates a key and pauses to
+                            display it once.
     --keychain-fallback=ask|allow|refuse
                             policy when the OS keychain is unavailable. 'ask' (default)
                             prompts before downgrading to ~/.local/share/mementos/key
@@ -269,9 +273,9 @@ Usage:
   mementos ingest [path] [--tag=t1,t2] [--dry-run]
                                                Bulk-import past content into the vault.
                                                No path → interactive: scan known sources
-                                               (Claude Code transcripts today; more
-                                               ingestors can be added under
-                                               src/ingestors/<name>/), pick which to
+                                               (Claude Code, Cursor, opencode, OpenClaw
+                                               histories; ChatGPT, Slack, Telegram,
+                                               WhatsApp exports), pick which to
                                                ingest, then prompt for tags one at a
                                                time. With a path: ingest that file or
                                                directory directly. Re-running is

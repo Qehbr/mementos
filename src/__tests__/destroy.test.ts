@@ -27,6 +27,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mkdtemp, mkdir, writeFile, rm, stat } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
+import { setFakeHome } from './_utils/fake-home.js'
 import { join } from 'node:path'
 
 const mockCheckbox = vi.fn<(...args: unknown[]) => Promise<string[]>>()
@@ -74,15 +75,14 @@ class ProcessExitError extends Error {
 
 describe('destroy', () => {
   let homeDir: string
-  let origHome: string | undefined
+  let restoreHome: () => void
   let exitSpy: ReturnType<typeof vi.spyOn>
   let logSpy: ReturnType<typeof vi.spyOn>
   let errSpy: ReturnType<typeof vi.spyOn>
 
   beforeEach(async () => {
     homeDir = await mkdtemp(join(tmpdir(), 'destroy-'))
-    origHome = process.env['HOME']
-    process.env['HOME'] = homeDir
+    restoreHome = setFakeHome(homeDir)
     vi.resetModules()
 
     exitSpy = vi.spyOn(process, 'exit').mockImplementation(((code?: number) => {
@@ -103,8 +103,7 @@ describe('destroy', () => {
     exitSpy.mockRestore()
     logSpy.mockRestore()
     errSpy.mockRestore()
-    if (origHome === undefined) delete process.env['HOME']
-    else process.env['HOME'] = origHome
+    restoreHome()
     await rm(homeDir, { recursive: true, force: true })
   })
 

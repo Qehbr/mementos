@@ -31,6 +31,10 @@ import type { InitContext } from './init-context/interface.js'
 
 const execFileP = promisify(execFile)
 
+/** npm's stdout+stderr cap for the install child. A native compile (hnswlib-node)
+ *  emits far more than execFile's 1 MiB default; overflow would mask the real error. */
+const NPM_OUTPUT_MAX_BUFFER_BYTES = 16 * 1024 * 1024
+
 /** Machine-local directory where optional packages are installed on demand. */
 export function pluginsDir(): string {
   return join(homedir(), '.config', 'mementos', 'plugins')
@@ -100,11 +104,25 @@ async function installAndVerify(
     JSON.stringify({ name: 'mementos-plugins', private: true, dependencies: deps }, null, 2),
   )
   try {
-    await execFileP('npm', ['install', '--prefix', dir])
+    // cwd-anchored `npm install` (no path args) instead of `--prefix <dir>`:
+    // Windows can only spawn npm (a .cmd shim) through a shell, and a shell
+    // invocation must never interpolate variable paths — with zero variable
+    // args there is nothing to quote or inject.
+    await execFileP('npm', ['install'], {
+      cwd: dir,
+      shell: process.platform === 'win32',
+      maxBuffer: NPM_OUTPUT_MAX_BUFFER_BYTES,
+    })
   } catch (e) {
     const msg = (e as NodeJS.ErrnoException).message ?? String(e)
     if (msg.includes('EACCES') || msg.includes('permission')) {
       throw new Error(`Permission denied installing ${failLabel}.\nRun manually: ${permissionFallback}`)
+    }
+    if (/gyp ERR|node-gyp/i.test(msg)) {
+      throw new Error(
+        `Failed to install ${failLabel}: it compiles native code, and no working C++ toolchain was found.\n`
+        + `${toolchainHint()}\nThen re-run the command. Full npm output:\n${msg}`,
+      )
     }
     throw new Error(`Failed to install ${failLabel}: ${msg}`)
   }
@@ -115,6 +133,15 @@ async function installAndVerify(
     } catch (e) {
       throw new Error(`Installed ${failLabel} but still cannot load ${name}: ${(e as Error).message}`)
     }
+  }
+}
+
+/** One platform-appropriate line telling the user how to get a C++ toolchain. */
+function toolchainHint(): string {
+  switch (process.platform) {
+    case 'darwin': return 'Install the Xcode Command Line Tools:  xcode-select --install'
+    case 'win32': return 'Install Visual Studio Build Tools (workload "Desktop development with C++") and Python 3 — see https://github.com/nodejs/node-gyp#on-windows'
+    default: return 'Install a C++ toolchain and Python 3 — Debian/Ubuntu:  sudo apt install build-essential python3 · Fedora:  sudo dnf install gcc-c++ make python3 · Arch:  sudo pacman -S base-devel python'
   }
 }
 

@@ -25,7 +25,7 @@ const { TEST_DIR, TEST_STATE_FILE } = vi.hoisted(() => {
 
 vi.mock('../daemon/constants.js', async (importOriginal) => {
   const original = await importOriginal<typeof import('../daemon/constants.js')>()
-  return { ...original, DAEMON_STATE_FILE: TEST_STATE_FILE }
+  return { ...original, daemonStateFile: () => TEST_STATE_FILE }
 })
 
 // Now we can import state.ts statically — it'll use the mocked path.

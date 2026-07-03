@@ -26,7 +26,7 @@ import { readFile, unlink } from 'node:fs/promises'
 import { dirname } from 'node:path'
 import { mkdir } from 'node:fs/promises'
 import { atomicWriteFile } from '../core/_utils/fs.js'
-import { DAEMON_STATE_FILE } from './constants.js'
+import { daemonStateFile } from './constants.js'
 
 export type DaemonStateValue = 'initializing' | 'ready'
 
@@ -49,7 +49,7 @@ export type DaemonState = 'absent' | 'initializing' | 'ready'
 export async function readDaemonStateFile(): Promise<DaemonStateFile | null> {
   let raw: string
   try {
-    raw = await readFile(DAEMON_STATE_FILE, 'utf8')
+    raw = await readFile(daemonStateFile(), 'utf8')
   } catch (e) {
     if ((e as NodeJS.ErrnoException).code === 'ENOENT') return null
     throw e
@@ -83,16 +83,16 @@ export async function daemonState(): Promise<DaemonState> {
  * note in the module docstring.
  */
 export async function writeDaemonStateFile(state: DaemonStateValue, startedAt: string): Promise<void> {
-  await mkdir(dirname(DAEMON_STATE_FILE), { recursive: true }).catch(() => { /* parent may exist */ })
+  await mkdir(dirname(daemonStateFile()), { recursive: true }).catch(() => { /* parent may exist */ })
   await atomicWriteFile(
-    DAEMON_STATE_FILE,
+    daemonStateFile(),
     JSON.stringify({ pid: process.pid, state, startedAt }, null, 2),
   )
 }
 
 /** Remove the state file. Daemon calls this on graceful shutdown. */
 export async function deleteDaemonStateFile(): Promise<void> {
-  await unlink(DAEMON_STATE_FILE).catch((e: NodeJS.ErrnoException) => {
+  await unlink(daemonStateFile()).catch((e: NodeJS.ErrnoException) => {
     if (e.code !== 'ENOENT') throw e
   })
 }

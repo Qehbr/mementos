@@ -8,8 +8,12 @@ on:
 
 jobs:
   test:
-    name: Lint + build + test
-    runs-on: ubuntu-latest
+    name: Lint + build + test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
     steps:
       - uses: actions/checkout@v5
 
@@ -26,15 +30,8 @@ jobs:
       - name: Typecheck + build
         run: npm run build
 
-      # Optional peerDependencies are normally installed on demand by
-      # `mementos init` into ~/.config/mementos/plugins/. The vitest suite
-      # exercises code that requires them (hnswlib-node, re2, simple-git),
-      # so install them into the same location the runtime resolves from.
-      - name: Install optional plugins for tests
-        run: |
-          mkdir -p ~/.config/mementos/plugins
-          npm install --prefix ~/.config/mementos/plugins --no-save \
-            hnswlib-node@3.0.0 re2@1.24.1 simple-git@3.36.0 bonjour-service@1.3.0
-
+      # Optional peerDependencies (hnswlib-node, re2, simple-git, …) are
+      # installed by the suite's global setup into ~/.config/mementos/plugins/
+      # — the same on-demand location `mementos init` uses at runtime.
       - name: Test
         run: npm test

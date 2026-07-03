@@ -275,10 +275,11 @@ describe('GitBackend', () => {
     git(['commit', '-m', 'memory: wedge-test', '--no-gpg-sign'], local)
 
     // Now install a pre-receive hook on the bare repo that rejects every
-    // push. The hook script must be executable.
+    // push. The hook script must be executable on POSIX; git-for-Windows
+    // runs hooks through its bundled sh regardless (NTFS has no exec bit).
     const hookPath = join(bare, 'hooks', 'pre-receive')
     writeFileSync(hookPath, '#!/bin/sh\nexit 1\n')
-    execFileSync('chmod', ['+x', hookPath])
+    if (process.platform !== 'win32') execFileSync('chmod', ['+x', hookPath])
 
     // The contract: sync must throw within bounded time. With the bug
     // (pushWithRetry → sync → pushWithRetry mutual recursion), this hangs
@@ -336,7 +337,8 @@ describe('defaultSshKeyPath', () => {
     expect(defaultSshKeyPath('git@github.com:alice/vault.git')).toBe(a)
     expect(a).not.toBe(b)
     // Lives under ~/.ssh and carries the mementos prefix so a future grep finds it.
-    expect(a).toMatch(/\/\.ssh\/mementos_vault_[a-f0-9]{8}$/)
+    // Separator class because path.join emits backslashes on Windows.
+    expect(a).toMatch(/[\\/]\.ssh[\\/]mementos_vault_[a-f0-9]{8}$/)
   })
 })
 

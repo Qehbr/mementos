@@ -12,7 +12,7 @@
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { startHttpApi, type HttpApiServer } from '../daemon/http-api.js'
-import { DAEMON_URL } from '../daemon/constants.js'
+import { DAEMON_HOST } from '../daemon/constants.js'
 import type { Vault } from '../core/vault/index.js'
 
 const TOKEN = 'test-token-deadbeef-deadbeef-deadbeef-deadbeef-deadbeef-deadbeef-de'
@@ -29,9 +29,15 @@ function explodingVault(): Vault {
 
 let api: HttpApiServer
 
+// `port: 0` = OS-assigned ephemeral port, so the suite never collides with a
+// real daemon running on the developer's machine (contributors are users).
+const bindEphemeral = (opts: { searchEnabled: boolean }): Promise<HttpApiServer> =>
+  startHttpApi(explodingVault(), { ...opts, token: TOKEN, port: 0 })
+const apiUrl = (path: string): string => `http://${DAEMON_HOST}:${api.port}${path}`
+
 afterEach(async () => {
   // Always close the API even if a test failed; otherwise the port stays
-  // bound and the next test's `assertPortFree` errors.
+  // bound and leaks across tests.
   if (api) await api.close()
 })
 
@@ -42,7 +48,7 @@ describe('startHttpApi readiness gate (503 until markReady)', () => {
   })
 
   it('returns 503 with {error: "daemon initializing"} for ANY request before markReady', async () => {
-    api = await startHttpApi(explodingVault(), { searchEnabled: false, token: TOKEN })
+    api = await bindEphemeral({ searchEnabled: false })
 
     // Try every shape of request — none should reach the vault.
     const probes = [
@@ -54,7 +60,7 @@ describe('startHttpApi readiness gate (503 until markReady)', () => {
     ]
 
     for (const probe of probes) {
-      const res = await fetch(`${DAEMON_URL}${probe.url}`, {
+      const res = await fetch(apiUrl(probe.url), {
         method: probe.method,
         headers: { 'authorization': `Bearer ${TOKEN}`, 'content-type': 'application/json' },
         ...(probe.body !== undefined ? { body: probe.body } : {}),
@@ -67,20 +73,20 @@ describe('startHttpApi readiness gate (503 until markReady)', () => {
   })
 
   it('returns 503 even WITHOUT a token (the gate fires before auth)', async () => {
-    api = await startHttpApi(explodingVault(), { searchEnabled: false, token: TOKEN })
+    api = await bindEphemeral({ searchEnabled: false })
 
     // A missing token would normally yield 401 — but during init we return
     // 503 first, because the 401 would mislead the user into thinking the
     // token is wrong when the daemon just hasn't loaded yet.
-    const res = await fetch(`${DAEMON_URL}/api/_meta/info`)
+    const res = await fetch(apiUrl('/api/_meta/info'))
     expect(res.status).toBe(503)
   })
 
   it('routes normally after markReady is called', async () => {
-    api = await startHttpApi(explodingVault(), { searchEnabled: true, token: TOKEN })
+    api = await bindEphemeral({ searchEnabled: true })
 
     // Confirm we're still gated before markReady
-    const before = await fetch(`${DAEMON_URL}/api/_meta/info`, {
+    const before = await fetch(apiUrl('/api/_meta/info'), {
       headers: { 'authorization': `Bearer ${TOKEN}` },
     })
     expect(before.status).toBe(503)
@@ -89,7 +95,7 @@ describe('startHttpApi readiness gate (503 until markReady)', () => {
 
     // Now the route should reach the real handler — /api/_meta/info doesn't
     // touch the vault, so the exploding vault is safe to leave in place.
-    const after = await fetch(`${DAEMON_URL}/api/_meta/info`, {
+    const after = await fetch(apiUrl('/api/_meta/info'), {
       headers: { 'authorization': `Bearer ${TOKEN}` },
     })
     expect(after.status).toBe(200)
@@ -99,9 +105,9 @@ describe('startHttpApi readiness gate (503 until markReady)', () => {
   })
 
   it('returns Retry-After header on 503 so well-behaved clients back off correctly', async () => {
-    api = await startHttpApi(explodingVault(), { searchEnabled: false, token: TOKEN })
+    api = await bindEphemeral({ searchEnabled: false })
 
-    const res = await fetch(`${DAEMON_URL}/api/_meta/info`)
+    const res = await fetch(apiUrl('/api/_meta/info'))
     expect(res.status).toBe(503)
     // Per RFC 9110: Retry-After is the polite way to tell a client when to come back.
     expect(res.headers.get('retry-after')).toBe('1')

@@ -12,8 +12,9 @@
  *   - The integration registry is mocked to nothing so real `claude` config can't be hit
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import { mkdtemp, rm, stat, readFile } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
+import { mkdtemp, mkdir, rm, stat, readFile } from 'node:fs/promises'
+import { setFakeHome } from '../_utils/fake-home.js'
+import { TMP_ROOT } from './_helpers.js'
 import { join } from 'node:path'
 import { randomBytes } from 'node:crypto'
 
@@ -56,17 +57,20 @@ class ProcessExitError extends Error {
 
 describe('mementos migrate (storage)', () => {
   let homeDir: string
-  let origHome: string | undefined
+  let restoreHome: () => void
   let origKey: string | undefined
   let origArgv: string[]
   let exitSpy: ReturnType<typeof vi.spyOn>
 
   beforeEach(async () => {
-    homeDir = await mkdtemp(join(tmpdir(), 'migrate-storage-'))
-    origHome = process.env['HOME']
+    // Repo-local fake home (not os.tmpdir()): requireFromPlugins' walk-up must
+    // reach the repo's node_modules, else init's hnsw setup runs a real npm
+    // install (network + C++ toolchain) inside the test.
+    await mkdir(TMP_ROOT, { recursive: true })
+    homeDir = await mkdtemp(join(TMP_ROOT, 'migrate-storage-'))
     origKey = process.env['MEMENTOS_RAW_KEY']
     origArgv = process.argv
-    process.env['HOME'] = homeDir
+    restoreHome = setFakeHome(homeDir)
     process.env['MEMENTOS_RAW_KEY'] = randomBytes(32).toString('base64')
     vi.resetModules()
 
@@ -85,8 +89,7 @@ describe('mementos migrate (storage)', () => {
     exitSpy.mockRestore()
     vi.restoreAllMocks()
     process.argv = origArgv
-    if (origHome === undefined) delete process.env['HOME']
-    else process.env['HOME'] = origHome
+    restoreHome()
     if (origKey === undefined) delete process.env['MEMENTOS_RAW_KEY']
     else process.env['MEMENTOS_RAW_KEY'] = origKey
     await rm(homeDir, { recursive: true, force: true })

@@ -8,7 +8,9 @@ For the key derivation pipeline and provider implementations, see [src/keys/READ
 
 ## Why encrypt vectors?
 
-Most encrypted memory tools encrypt the text but leave the embedding vectors in plaintext. This is a real privacy leak. [Research](https://arxiv.org/abs/2310.06816) (ALGEN, ZSinvert, 2025) demonstrates that embedding-inversion attacks can reconstruct original text from vectors with high accuracy, and that existing defenses are largely ineffective. mementos encrypts the text **and** the vectors.
+Most encrypted memory tools encrypt the text but leave the embedding vectors in plaintext. This is a real privacy leak. [Morris et al., EMNLP 2023](https://arxiv.org/abs/2310.06816) reconstructs the original text from vectors — 92% exact recovery for 32-token inputs — and the attacks keep getting cheaper: [ALGEN (ACL 2025)](https://arxiv.org/abs/2502.11308) inverts embeddings across models and languages from a single leaked sample and finds none of the defenses it examines effective, and [ZSInvert (2025)](https://arxiv.org/abs/2504.00147) inverts any embedding zero-shot, with no attack-model training at all. A 2026 preprint ([Ghost Vectors](https://arxiv.org/abs/2606.18497)) goes further: it recovers names and locations straight from raw HNSW index files on disk, bypassing API-level protections — its proposed remedy is exactly this design: encrypt the vectors.
+
+mementos encrypts the text **and** the vectors.
 
 ## The algorithm: AES-256-GCM
 

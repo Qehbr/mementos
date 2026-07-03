@@ -111,7 +111,9 @@ describe('LocalBackend', () => {
     ).rejects.toThrow(/etag mismatch.*no longer exists/)
   })
 
-  it('put with ifMatch propagates a real OS read error (not converted to EtagMismatchError)', async () => {
+  // win32: chmod 000 doesn't deny reads on Windows (no POSIX permission bits),
+  // so the fault this test injects cannot fire there.
+  it.skipIf(process.platform === 'win32')('put with ifMatch propagates a real OS read error (not converted to EtagMismatchError)', async () => {
     // Regression: assertIfMatch used to bare-catch every error from the re-get, so a real
     // EACCES/EIO/ENOTDIR was masquerading as 'file no longer exists' → StaleMementoError →
     // AI followed the re-read-and-retry playbook for a permissions bug. Now ENOENT is the

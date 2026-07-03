@@ -30,8 +30,11 @@ describe('cross-device passive sync (after both machines initialized)', () => {
   let exitSpy: MockInstance
 
   // Save originals so afterEach restores them — same shape as setupTestEnv but with
-  // two HOMEs we flip between.
+  // two HOMEs we flip between. USERPROFILE mirrors HOME throughout: os.homedir()
+  // reads it on Windows, so flipping HOME alone would leave that platform on the
+  // real home directory.
   let origHome: string | undefined
+  let origProfile: string | undefined
   let origKey: string | undefined
   let origArgv: string[]
 
@@ -44,6 +47,7 @@ describe('cross-device passive sync (after both machines initialized)', () => {
 
     sharedKey = randomBytes(32).toString('base64')
     origHome = process.env['HOME']
+    origProfile = process.env['USERPROFILE']
     origKey = process.env['MEMENTOS_RAW_KEY']
     origArgv = process.argv
     process.env['MEMENTOS_RAW_KEY'] = sharedKey
@@ -58,13 +62,18 @@ describe('cross-device passive sync (after both machines initialized)', () => {
     process.argv = origArgv
     if (origHome === undefined) delete process.env['HOME']
     else process.env['HOME'] = origHome
+    if (origProfile === undefined) delete process.env['USERPROFILE']
+    else process.env['USERPROFILE'] = origProfile
     if (origKey === undefined) delete process.env['MEMENTOS_RAW_KEY']
     else process.env['MEMENTOS_RAW_KEY'] = origKey
     await rm(homeA, { recursive: true, force: true })
     await rm(homeB, { recursive: true, force: true })
   })
 
-  function useHome(home: string): void { process.env['HOME'] = home }
+  function useHome(home: string): void {
+    process.env['HOME'] = home
+    process.env['USERPROFILE'] = home
+  }
 
   async function initOn(home: string): Promise<void> {
     useHome(home)

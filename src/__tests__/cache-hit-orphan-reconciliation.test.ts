@@ -28,6 +28,7 @@ import { readFileSync, writeFileSync } from 'node:fs'
 import { execFileSync } from 'node:child_process'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
+import { setFakeHome } from './_utils/fake-home.js'
 import { Vault } from '../core/vault/index.js'
 import { LocalBackend } from '../storage/local/index.js'
 import { MnemonicKeyProvider } from '../keys/mnemonic/index.js'
@@ -39,7 +40,7 @@ const MNEMONIC = 'abandon abandon abandon abandon abandon abandon abandon abando
 
 let dir: string
 let fakeHome: string
-let realHome: string | undefined
+let restoreHome: () => void
 
 function makeVault(): Vault {
   const index = new BruteForceIndex(FAKE_DIMS)
@@ -57,13 +58,11 @@ function makeVault(): Vault {
 beforeEach(async () => {
   dir = await mkdtemp(join(tmpdir(), 'mementos-orphan-'))
   fakeHome = await mkdtemp(join(tmpdir(), 'mementos-orphan-home-'))
-  realHome = process.env['HOME']
-  process.env['HOME'] = fakeHome
+  restoreHome = setFakeHome(fakeHome)
 })
 
 afterEach(async () => {
-  if (realHome === undefined) delete process.env['HOME']
-  else process.env['HOME'] = realHome
+  restoreHome()
   await rm(dir, { recursive: true, force: true })
   await rm(dir + '.lock', { recursive: true, force: true })
   await rm(fakeHome, { recursive: true, force: true })
@@ -102,7 +101,10 @@ function corruptMemPreservingMtime(memPath: string): void {
 }
 
 describe('cache-hit startup: a corrupt .mem with preserved mtime', () => {
-  it('does not leave an orphan in the index — recall returns clean instead of crashing', async () => {
+  // win32: corruptMemPreservingMtime needs `cp -a` / `touch -r` — there is no
+  // Windows equivalent that preserves nanosecond mtime (Node's utimes loses
+  // sub-microsecond bits, which silently downgrades this to the cache-MISS path).
+  it.skipIf(process.platform === 'win32')('does not leave an orphan in the index — recall returns clean instead of crashing', async () => {
     // Phase 1: write two mementos and flush the cache.
     const v1 = makeVault()
     await v1.startup()
@@ -184,7 +186,8 @@ describe('cache-hit startup: a corrupt .mem with preserved mtime', () => {
     await v2.close()
   })
 
-  it('write_memento cannot rank the orphan as a duplicate', async () => {
+  // win32: same corruptMemPreservingMtime dependency as above.
+  it.skipIf(process.platform === 'win32')('write_memento cannot rank the orphan as a duplicate', async () => {
     // Same setup as above. The duplicate check uses `index.search(vector, 1)`
     // bypassing rankSemantic, so it's a separate audit surface for the
     // same orphan-in-index bug.

@@ -16,7 +16,8 @@
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mkdtemp, mkdir, rm, readdir, readFile, stat, writeFile, cp } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
+import { setFakeHome } from '../_utils/fake-home.js'
+import { TMP_ROOT } from './_helpers.js'
 import { join } from 'node:path'
 import { randomBytes } from 'node:crypto'
 import { stagingDirFor, backupDirFor } from '../../cli/_utils/migration-backup.js'
@@ -61,17 +62,20 @@ const ZERO_ENTROPY_MNEMONIC = Array(23).fill('abandon').concat(['art']).join(' '
 
 describe('mementos migrate (key)', () => {
   let homeDir: string
-  let origHome: string | undefined
+  let restoreHome: () => void
   let origKey: string | undefined
   let origArgv: string[]
   let exitSpy: ReturnType<typeof vi.spyOn>
 
   beforeEach(async () => {
-    homeDir = await mkdtemp(join(tmpdir(), 'migrate-key-'))
-    origHome = process.env['HOME']
+    // Repo-local fake home (not os.tmpdir()): requireFromPlugins' walk-up must
+    // reach the repo's node_modules, else init's hnsw setup runs a real npm
+    // install (network + C++ toolchain) inside the test.
+    await mkdir(TMP_ROOT, { recursive: true })
+    homeDir = await mkdtemp(join(TMP_ROOT, 'migrate-key-'))
     origKey = process.env['MEMENTOS_RAW_KEY']
     origArgv = process.argv
-    process.env['HOME'] = homeDir
+    restoreHome = setFakeHome(homeDir)
     // Initial vault key — random base64 entropy.
     process.env['MEMENTOS_RAW_KEY'] = randomBytes(32).toString('base64')
     vi.resetModules()
@@ -95,8 +99,7 @@ describe('mementos migrate (key)', () => {
     exitSpy.mockRestore()
     vi.restoreAllMocks()
     process.argv = origArgv
-    if (origHome === undefined) delete process.env['HOME']
-    else process.env['HOME'] = origHome
+    restoreHome()
     if (origKey === undefined) delete process.env['MEMENTOS_RAW_KEY']
     else process.env['MEMENTOS_RAW_KEY'] = origKey
     await rm(homeDir, { recursive: true, force: true })

@@ -68,6 +68,6 @@ describe('ChatGptExportIngestor.parse', () => {
   })
 
   it('returns no sessions for non-JSON input', async () => {
-    expect(await createChatGptIngestor().parse(import.meta.url.replace('file://', ''))).toEqual([])
+    expect(await createChatGptIngestor().parse(fileURLToPath(import.meta.url))).toEqual([])
   })
 })

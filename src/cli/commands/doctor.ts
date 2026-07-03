@@ -32,7 +32,7 @@ import { requireImpl, buildKeyProvider, buildStorageBackend, buildStorageAndKey 
 import { readManifest } from '../_utils/migration-manifest.js'
 import { getDaemonState } from '../../daemon/api-client.js'
 import { readDaemonStateFile } from '../../daemon/state.js'
-import { DAEMON_URL, DAEMON_TOKEN_FILE } from '../../daemon/constants.js'
+import { DAEMON_URL, daemonTokenFile } from '../../daemon/constants.js'
 import type { MachineConfig, VaultConfig } from '../../core/types.js'
 import type { MemFile } from '../../core/vault/types.js'
 
@@ -321,19 +321,19 @@ async function checkDaemon(): Promise<CheckResult> {
   }
   // state === 'ready' — verify the token file is present + 0600.
   try {
-    const s = await stat(DAEMON_TOKEN_FILE)
+    const s = await stat(daemonTokenFile())
     const mode = s.mode & 0o777
     if (process.platform !== 'win32' && mode !== 0o600) {
       return {
         name: 'Daemon', status: 'fail',
         detail: `running at ${DAEMON_URL} but token file has unsafe perms (${mode.toString(8)})`,
-        hint: `fix:  chmod 600 ${DAEMON_TOKEN_FILE}   (or restart the daemon: \`mementos stop && mementos start\`)`,
+        hint: `fix:  chmod 600 ${daemonTokenFile()}   (or restart the daemon: \`mementos stop && mementos start\`)`,
       }
     }
   } catch {
     return {
       name: 'Daemon', status: 'fail',
-      detail: `running at ${DAEMON_URL} but token file missing at ${DAEMON_TOKEN_FILE}`,
+      detail: `running at ${DAEMON_URL} but token file missing at ${daemonTokenFile()}`,
       hint: 'restart: `mementos stop && mementos start`',
     }
   }

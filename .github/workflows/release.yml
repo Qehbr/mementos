@@ -41,13 +41,9 @@ jobs:
       - run: npm run lint
       - run: npm run build
 
-      # Same as CI: tests exercise optional peerDeps that live in pluginsDir.
-      - name: Install optional plugins for tests
-        run: |
-          mkdir -p ~/.config/mementos/plugins
-          npm install --prefix ~/.config/mementos/plugins --no-save \
-            hnswlib-node@3.0.0 re2@1.24.1 simple-git@3.36.0 bonjour-service@1.3.0
-
+      # Optional peerDeps (hnswlib-node, re2, simple-git, …) are installed by
+      # the suite's global setup into ~/.config/mementos/plugins/ — same
+      # mechanism as CI and as `mementos init` at runtime.
       - run: npm test
 
       - name: Publish to npm

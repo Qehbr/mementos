@@ -7,6 +7,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { mkdtemp, rm, readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
+import { setFakeHome } from './_utils/fake-home.js'
 import type { InitContext } from '../core/init-context/interface.js'
 import type { BinarySurface } from '../integrations/interface.js'
 import { promptBinaryToggle } from '../integrations/_utils/prompt.js'
@@ -108,16 +109,14 @@ describe('promptBinaryToggle', () => {
 
 describe('AntigravityCliIntegration BinarySurface toggles', () => {
   let home: string
-  let prevHome: string | undefined
+  let restoreHome: () => void
 
   beforeEach(async () => {
     home = await mkdtemp(join(tmpdir(), 'mementos-binary-toggle-'))
-    prevHome = process.env['HOME']
-    process.env['HOME'] = home
+    restoreHome = setFakeHome(home)
   })
   afterEach(async () => {
-    if (prevHome === undefined) delete process.env['HOME']
-    else process.env['HOME'] = prevHome
+    restoreHome()
     await rm(home, { recursive: true, force: true })
   })
 

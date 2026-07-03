@@ -13,6 +13,7 @@ import { vi, describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { mkdtemp, rm, readFile, writeFile, stat, mkdir } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
+import { setFakeHome } from './_utils/fake-home.js'
 
 const mockExecCalls: string[][] = []
 const mockServers = new Set<string>()
@@ -42,19 +43,17 @@ vi.mock('node:child_process', () => ({
 
 describe('CodexIntegration', () => {
   let home: string
-  let prevHome: string | undefined
+  let restoreHome: () => void
 
   beforeEach(async () => {
     mockExecCalls.length = 0
     mockServers.clear()
     home = await mkdtemp(join(tmpdir(), 'mementos-codex-'))
-    prevHome = process.env['HOME']
-    process.env['HOME'] = home
+    restoreHome = setFakeHome(home)
   })
 
   afterEach(async () => {
-    if (prevHome === undefined) delete process.env['HOME']
-    else process.env['HOME'] = prevHome
+    restoreHome()
     await rm(home, { recursive: true, force: true })
   })
 

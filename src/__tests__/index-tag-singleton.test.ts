@@ -20,6 +20,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
+import { setFakeHome } from './_utils/fake-home.js'
 import { randomUUID } from 'node:crypto'
 import { Vault, ReservedIndexTagError } from '../core/vault/index.js'
 import { LocalBackend } from '../storage/local/index.js'
@@ -33,7 +34,7 @@ const MNEMONIC = 'abandon abandon abandon abandon abandon abandon abandon abando
 
 let dir: string
 let fakeHome: string
-let realHome: string | undefined
+let restoreHome: () => void
 
 function makeVault(): Vault {
   const index = new BruteForceIndex(FAKE_DIMS)
@@ -51,13 +52,11 @@ function makeVault(): Vault {
 beforeEach(async () => {
   dir = await mkdtemp(join(tmpdir(), 'mementos-index-tag-'))
   fakeHome = await mkdtemp(join(tmpdir(), 'mementos-index-tag-home-'))
-  realHome = process.env['HOME']
-  process.env['HOME'] = fakeHome
+  restoreHome = setFakeHome(fakeHome)
 })
 
 afterEach(async () => {
-  if (realHome === undefined) delete process.env['HOME']
-  else process.env['HOME'] = realHome
+  restoreHome()
   await rm(dir, { recursive: true, force: true })
   await rm(dir + '.lock', { recursive: true, force: true })
   await rm(fakeHome, { recursive: true, force: true })
