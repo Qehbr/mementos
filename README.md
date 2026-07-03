@@ -26,6 +26,8 @@ npm install -g mementos
 mementos init       # interactive — write down the 24-word vault key
 ```
 
+**Requirements:** Node ≥ 22.5, plus a C++ toolchain the first time `init` runs — the default vector index (`hnswlib-node`) compiles from source. Linux: `build-essential` + `python3` · macOS: `xcode-select --install` · Windows: Visual Studio Build Tools ("Desktop development with C++").
+
 `mementos init` walks you through it: storage backend, embedder, vector index, key provider. Every choice has a sensible default — press Enter to accept. The vault key is shown once — **write it down**; it's the only thing that can decrypt your memories.
 
 After init, mementos auto-detects the AI clients on your machine and wires itself in. Open Claude Code / Cursor / Codex / Antigravity CLI / Claude Desktop / opencode / OpenClaw and start chatting — mementos is already there. The AI calls `recall` when past context would help, and `write_memento` when it learns something worth remembering.
@@ -35,7 +37,7 @@ Installed a new AI client later? Wire it in with `mementos integration enable <n
 ## What it does
 
 - **One install, no infrastructure.** No Docker, no Postgres, no Qdrant. `npm install -g` and you're done.
-- **Encrypted by default — including the vectors.** Most "encrypted" memory tools leave embedding vectors in plaintext, but [Morris et al., EMNLP 2023](https://arxiv.org/abs/2310.06816) showed embeddings can be inverted back to the original text with 92% exact recovery for 32-token inputs. mementos encrypts the text *and* the vectors. Your key never leaves your device.
+- **Encrypted by default — including the vectors.** Most "encrypted" memory tools leave embedding vectors in plaintext, but [Morris et al., EMNLP 2023](https://arxiv.org/abs/2310.06816) showed embeddings can be inverted back to the original text with 92% exact recovery for 32-token inputs — and newer attacks defeat the usual defenses ([ALGEN, ACL 2025](https://arxiv.org/abs/2502.11308)). mementos encrypts the text *and* the vectors. Your key never leaves your device.
 - **Cross-device, your way.** Sync via git (full version history) or a cloud folder you already use (Dropbox, iCloud, Google Drive). No mementos server in the middle.
 - **Works with every MCP-compatible AI tool.** Claude Code, Cursor, Codex, Claude Desktop, Antigravity CLI, opencode, OpenClaw, Antigravity IDE — one install wires them all up.
 - **Imports your past conversations.** Bulk-ingest existing transcripts from Claude Code, ChatGPT exports, Slack, Telegram, WhatsApp, Cursor, opencode, OpenClaw — so the AI starts with your history, not a blank slate.
