@@ -13,9 +13,9 @@
  * Test isolation contract — same posture as the other migrate tests.
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import { mkdtemp, rm, readdir, readFile, stat, writeFile } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
+import { mkdtemp, mkdir, rm, readdir, readFile, stat, writeFile } from 'node:fs/promises'
 import { setFakeHome } from '../_utils/fake-home.js'
+import { TMP_ROOT } from './_helpers.js'
 import { join } from 'node:path'
 import { randomBytes } from 'node:crypto'
 import { stagingDirFor, backupDirFor } from '../../cli/_utils/migration-backup.js'
@@ -113,7 +113,11 @@ describe('mementos migrate (embedder)', () => {
   let exitSpy: ReturnType<typeof vi.spyOn>
 
   beforeEach(async () => {
-    homeDir = await mkdtemp(join(tmpdir(), 'migrate-embedder-'))
+    // Repo-local fake home (not os.tmpdir()): requireFromPlugins' walk-up must
+    // reach the repo's node_modules, else init's hnsw setup runs a real npm
+    // install (network + C++ toolchain) inside the test.
+    await mkdir(TMP_ROOT, { recursive: true })
+    homeDir = await mkdtemp(join(TMP_ROOT, 'migrate-embedder-'))
     origKey = process.env['MEMENTOS_RAW_KEY']
     origArgv = process.argv
     restoreHome = setFakeHome(homeDir)

@@ -337,7 +337,8 @@ describe('defaultSshKeyPath', () => {
     expect(defaultSshKeyPath('git@github.com:alice/vault.git')).toBe(a)
     expect(a).not.toBe(b)
     // Lives under ~/.ssh and carries the mementos prefix so a future grep finds it.
-    expect(a).toMatch(/\/\.ssh\/mementos_vault_[a-f0-9]{8}$/)
+    // Separator class because path.join emits backslashes on Windows.
+    expect(a).toMatch(/[\\/]\.ssh[\\/]mementos_vault_[a-f0-9]{8}$/)
   })
 })
 

@@ -12,9 +12,9 @@
  *   - The integration registry is mocked to nothing so real `claude` config can't be hit
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import { mkdtemp, rm, stat, readFile } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
+import { mkdtemp, mkdir, rm, stat, readFile } from 'node:fs/promises'
 import { setFakeHome } from '../_utils/fake-home.js'
+import { TMP_ROOT } from './_helpers.js'
 import { join } from 'node:path'
 import { randomBytes } from 'node:crypto'
 
@@ -63,7 +63,11 @@ describe('mementos migrate (storage)', () => {
   let exitSpy: ReturnType<typeof vi.spyOn>
 
   beforeEach(async () => {
-    homeDir = await mkdtemp(join(tmpdir(), 'migrate-storage-'))
+    // Repo-local fake home (not os.tmpdir()): requireFromPlugins' walk-up must
+    // reach the repo's node_modules, else init's hnsw setup runs a real npm
+    // install (network + C++ toolchain) inside the test.
+    await mkdir(TMP_ROOT, { recursive: true })
+    homeDir = await mkdtemp(join(TMP_ROOT, 'migrate-storage-'))
     origKey = process.env['MEMENTOS_RAW_KEY']
     origArgv = process.argv
     restoreHome = setFakeHome(homeDir)
