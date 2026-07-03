@@ -275,10 +275,11 @@ describe('GitBackend', () => {
     git(['commit', '-m', 'memory: wedge-test', '--no-gpg-sign'], local)
 
     // Now install a pre-receive hook on the bare repo that rejects every
-    // push. The hook script must be executable.
+    // push. The hook script must be executable on POSIX; git-for-Windows
+    // runs hooks through its bundled sh regardless (NTFS has no exec bit).
     const hookPath = join(bare, 'hooks', 'pre-receive')
     writeFileSync(hookPath, '#!/bin/sh\nexit 1\n')
-    execFileSync('chmod', ['+x', hookPath])
+    if (process.platform !== 'win32') execFileSync('chmod', ['+x', hookPath])
 
     // The contract: sync must throw within bounded time. With the bug
     // (pushWithRetry → sync → pushWithRetry mutual recursion), this hangs

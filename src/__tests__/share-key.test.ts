@@ -13,6 +13,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
+import { setFakeHome } from './_utils/fake-home.js'
 import { join } from 'node:path'
 import { randomBytes } from 'node:crypto'
 
@@ -44,7 +45,7 @@ class ProcessExitError extends Error {
 
 describe('share-key', () => {
   let homeDir: string
-  let origHome: string | undefined
+  let restoreHome: () => void
   let origKey: string | undefined
   let origIsTTY: boolean | undefined
   let exitSpy: ReturnType<typeof vi.spyOn>
@@ -53,10 +54,9 @@ describe('share-key', () => {
 
   beforeEach(async () => {
     homeDir = await mkdtemp(join(tmpdir(), 'share-key-'))
-    origHome = process.env['HOME']
     origKey = process.env['MEMENTOS_RAW_KEY']
     origIsTTY = process.stdout.isTTY
-    process.env['HOME'] = homeDir
+    restoreHome = setFakeHome(homeDir)
     process.stdout.isTTY = true
 
     // KeychainKeyProvider caches its FALLBACK_FILE path at module load time using
@@ -78,8 +78,7 @@ describe('share-key', () => {
     exitSpy.mockRestore()
     logSpy.mockRestore()
     errSpy.mockRestore()
-    if (origHome === undefined) delete process.env['HOME']
-    else process.env['HOME'] = origHome
+    restoreHome()
     if (origKey === undefined) delete process.env['MEMENTOS_RAW_KEY']
     else process.env['MEMENTOS_RAW_KEY'] = origKey
     process.stdout.isTTY = origIsTTY

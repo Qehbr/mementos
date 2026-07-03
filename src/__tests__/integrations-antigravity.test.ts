@@ -8,19 +8,18 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { mkdtemp, rm, readFile, writeFile, mkdir } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
+import { setFakeHome } from './_utils/fake-home.js'
 
 describe('AntigravityIntegration', () => {
   let home: string
-  let prevHome: string | undefined
+  let restoreHome: () => void
 
   beforeEach(async () => {
     home = await mkdtemp(join(tmpdir(), 'mementos-antigravity-'))
-    prevHome = process.env['HOME']
-    process.env['HOME'] = home
+    restoreHome = setFakeHome(home)
   })
   afterEach(async () => {
-    if (prevHome === undefined) delete process.env['HOME']
-    else process.env['HOME'] = prevHome
+    restoreHome()
     await rm(home, { recursive: true, force: true })
   })
 

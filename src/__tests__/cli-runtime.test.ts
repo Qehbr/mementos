@@ -19,27 +19,23 @@ import { mkdtemp, mkdir, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { runList, runRecall, runWrite, runUpdate, runChronicle, translateMcpToCli } from '../cli/commands/runtime.js'
 import { TMP_ROOT } from './integration/_helpers.js'
+import { setFakeHome } from './_utils/fake-home.js'
 
 /**
- * Point HOME (and USERPROFILE, for Windows) at a fresh empty dir for the
- * duration of `fn`. The daemon client resolves its state/token files from
- * `homedir()` at call time, so an empty HOME is a deterministic "no daemon" —
- * without this, a live daemon on the developer's machine (contributors are
- * users) answers the request and the expected failure never fires.
+ * Run `fn` under a fresh empty fake home. The daemon client resolves its
+ * state/token files from `homedir()` at call time, so an empty home is a
+ * deterministic "no daemon" — without this, a live daemon on the developer's
+ * machine (contributors are users) answers the request and the expected
+ * failure never fires.
  */
 async function withTmpHome(fn: () => Promise<void>): Promise<void> {
   await mkdir(TMP_ROOT, { recursive: true })
   const dir = await mkdtemp(join(TMP_ROOT, 'cli-home-'))
-  const orig = { home: process.env['HOME'], profile: process.env['USERPROFILE'] }
-  process.env['HOME'] = dir
-  process.env['USERPROFILE'] = dir
+  const restoreHome = setFakeHome(dir)
   try {
     await fn()
   } finally {
-    if (orig.home === undefined) delete process.env['HOME']
-    else process.env['HOME'] = orig.home
-    if (orig.profile === undefined) delete process.env['USERPROFILE']
-    else process.env['USERPROFILE'] = orig.profile
+    restoreHome()
     await rm(dir, { recursive: true, force: true })
   }
 }

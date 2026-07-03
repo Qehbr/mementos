@@ -19,6 +19,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { mkdtemp, rm, utimes } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
+import { setFakeHome } from './_utils/fake-home.js'
 import { randomUUID } from 'node:crypto'
 import { Vault } from '../core/vault/index.js'
 import { LocalBackend } from '../storage/local/index.js'
@@ -51,7 +52,7 @@ class CountingIndex extends BruteForceIndex {
 
 let dir: string
 let fakeHome: string
-let realHome: string | undefined
+let restoreHome: () => void
 
 function makeVault(index: VectorIndex): Vault {
   return new Vault({
@@ -70,13 +71,11 @@ beforeEach(async () => {
   // The index cache lives under ~/.config/mementos/cache/ — isolate HOME so the test
   // neither reads a real cache nor writes into the developer's config dir.
   fakeHome = await mkdtemp(join(tmpdir(), 'mementos-cache-home-'))
-  realHome = process.env['HOME']
-  process.env['HOME'] = fakeHome
+  restoreHome = setFakeHome(fakeHome)
 })
 
 afterEach(async () => {
-  if (realHome === undefined) delete process.env['HOME']
-  else process.env['HOME'] = realHome
+  restoreHome()
   await rm(dir, { recursive: true, force: true })
   await rm(dir + '.lock', { recursive: true, force: true })
   await rm(fakeHome, { recursive: true, force: true })

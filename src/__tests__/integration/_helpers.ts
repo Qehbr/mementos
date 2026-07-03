@@ -18,6 +18,7 @@ import { fileURLToPath } from 'node:url'
 import { randomBytes } from 'node:crypto'
 import { execSync } from 'node:child_process'
 import { vi, type MockInstance } from 'vitest'
+import { setFakeHome } from '../_utils/fake-home.js'
 
 /** Tests root (this file is at src/__tests__/integration/_helpers.ts). */
 const TESTS_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
@@ -61,11 +62,10 @@ export async function setupTestEnv(): Promise<IntegrationContext> {
   const homeDir = await mkdtemp(join(TMP_ROOT, 'home-'))
   const vaultPath = join(homeDir, '.mementos')
 
-  const origHome = process.env['HOME']
   const origKey = process.env['MEMENTOS_RAW_KEY']
   const origArgv = process.argv
 
-  process.env['HOME'] = homeDir
+  const restoreHome = setFakeHome(homeDir)
   const rawKey = randomBytes(32).toString('base64')
   process.env['MEMENTOS_RAW_KEY'] = rawKey
 
@@ -83,8 +83,7 @@ export async function setupTestEnv(): Promise<IntegrationContext> {
     cleanup: async () => {
       exitSpy.mockRestore()
       process.argv = origArgv
-      if (origHome === undefined) delete process.env['HOME']
-      else process.env['HOME'] = origHome
+      restoreHome()
       if (origKey === undefined) delete process.env['MEMENTOS_RAW_KEY']
       else process.env['MEMENTOS_RAW_KEY'] = origKey
       await rm(homeDir, { recursive: true, force: true })
