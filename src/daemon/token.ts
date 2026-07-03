@@ -20,7 +20,7 @@
 import { writeFile, readFile, unlink, mkdir } from 'node:fs/promises'
 import { dirname } from 'node:path'
 import { randomBytes } from 'node:crypto'
-import { DAEMON_TOKEN_FILE, TOKEN_BYTES } from './constants.js'
+import { daemonTokenFile, TOKEN_BYTES } from './constants.js'
 
 /**
  * Generate a fresh token in memory. Does NOT touch disk — `mementos start`
@@ -34,18 +34,18 @@ export function generateToken(): string {
 
 /** Write `token` to the shared file with `0600` perms. */
 export async function writeTokenFile(token: string): Promise<void> {
-  await mkdir(dirname(DAEMON_TOKEN_FILE), { recursive: true }).catch(() => { /* parent may exist */ })
-  await writeFile(DAEMON_TOKEN_FILE, token, { encoding: 'utf8', mode: 0o600 })
+  await mkdir(dirname(daemonTokenFile()), { recursive: true }).catch(() => { /* parent may exist */ })
+  await writeFile(daemonTokenFile(), token, { encoding: 'utf8', mode: 0o600 })
 }
 
 /** Read the token file. Throws if missing — clients use that to detect "no daemon". */
 export async function readToken(): Promise<string> {
-  return (await readFile(DAEMON_TOKEN_FILE, 'utf8')).trim()
+  return (await readFile(daemonTokenFile(), 'utf8')).trim()
 }
 
 /** Remove the token file. Daemon calls on graceful shutdown. */
 export async function deleteToken(): Promise<void> {
-  await unlink(DAEMON_TOKEN_FILE).catch(() => { /* already gone — fine */ })
+  await unlink(daemonTokenFile()).catch(() => { /* already gone — fine */ })
 }
 
 /**

@@ -42,11 +42,20 @@ export const TOKEN_BYTES = 32
  * state file is the canonical source for "is a daemon up, and is it ready?"
  * checks — readers verify the PID is alive (`kill(pid, 0)`) before trusting
  * it, so a crash-leftover stale file is treated as "absent."
+ *
+ * A function, not a constant: `homedir()` must resolve at call time so tests
+ * that fake HOME never read the machine's real daemon state (same lazy-path
+ * convention as `vaultPath()` / `machineConfigFile()` in core/config.ts).
  */
-export const DAEMON_STATE_FILE = join(homedir(), '.config', 'mementos', 'daemon.state')
+export function daemonStateFile(): string {
+  return join(homedir(), '.config', 'mementos', 'daemon.state')
+}
 
-/** Bearer-token file path — written `0600` by daemon at startup, read by clients. */
-export const DAEMON_TOKEN_FILE = join(homedir(), '.config', 'mementos', 'daemon.token')
+/** Bearer-token file path — written `0600` by daemon at startup, read by clients.
+ *  Lazy for the same test-isolation reason as `daemonStateFile()`. */
+export function daemonTokenFile(): string {
+  return join(homedir(), '.config', 'mementos', 'daemon.token')
+}
 
 /**
  * Brief sanity-check window after `mementos start` spawns a detached daemon —

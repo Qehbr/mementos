@@ -27,7 +27,7 @@
  * object; response body = result). curl-debuggable end to end.
  */
 import { createServer as createHttpServer, type IncomingMessage, type ServerResponse, type Server as HttpServer } from 'node:http'
-import { createConnection } from 'node:net'
+import { createConnection, type AddressInfo } from 'node:net'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { join, dirname } from 'node:path'
@@ -46,6 +46,8 @@ export interface HttpApiServer {
    * `vault.startup()` resolves.
    */
   markReady(): void
+  /** Port actually bound — `DAEMON_PORT` in production, OS-assigned when opts.port was 0. */
+  port: number
 }
 
 const INGEST_BODY = z.object({
@@ -63,10 +65,19 @@ const INGEST_BODY = z.object({
 interface StartOpts {
   searchEnabled: boolean
   token: string
+  /**
+   * Port to bind. Production callers omit it (→ `DAEMON_PORT`). Tests pass 0
+   * for an OS-assigned ephemeral port so suites never collide with a live
+   * daemon on the machine running them.
+   */
+  port?: number
 }
 
 export async function startHttpApi(vault: Vault, opts: StartOpts): Promise<HttpApiServer> {
-  await assertPortFree(DAEMON_HOST, DAEMON_PORT)
+  const port = opts.port ?? DAEMON_PORT
+  // Port 0 means "let the OS pick" — there is nothing to probe; the bind
+  // itself can't collide.
+  if (port !== 0) await assertPortFree(DAEMON_HOST, port)
 
   const tools = activeTools({ searchEnabled: opts.searchEnabled })
   const version = packageVersion()
@@ -104,13 +115,14 @@ export async function startHttpApi(vault: Vault, opts: StartOpts): Promise<HttpA
 
   await new Promise<void>((resolve, reject) => {
     server.once('error', reject)
-    server.listen(DAEMON_PORT, DAEMON_HOST, () => {
+    server.listen(port, DAEMON_HOST, () => {
       server.removeListener('error', reject)
       resolve()
     })
   })
 
   return {
+    port: (server.address() as AddressInfo).port,
     markReady: () => { ready = true },
     close: () => new Promise<void>(resolve => {
       // `server.close()` stops accepting new connections and waits for

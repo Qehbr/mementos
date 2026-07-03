@@ -15,7 +15,34 @@
  * own integration smokes.
  */
 import { describe, it, expect } from 'vitest'
+import { mkdtemp, mkdir, rm } from 'node:fs/promises'
+import { join } from 'node:path'
 import { runList, runRecall, runWrite, runUpdate, runChronicle, translateMcpToCli } from '../cli/commands/runtime.js'
+import { TMP_ROOT } from './integration/_helpers.js'
+
+/**
+ * Point HOME (and USERPROFILE, for Windows) at a fresh empty dir for the
+ * duration of `fn`. The daemon client resolves its state/token files from
+ * `homedir()` at call time, so an empty HOME is a deterministic "no daemon" —
+ * without this, a live daemon on the developer's machine (contributors are
+ * users) answers the request and the expected failure never fires.
+ */
+async function withTmpHome(fn: () => Promise<void>): Promise<void> {
+  await mkdir(TMP_ROOT, { recursive: true })
+  const dir = await mkdtemp(join(TMP_ROOT, 'cli-home-'))
+  const orig = { home: process.env['HOME'], profile: process.env['USERPROFILE'] }
+  process.env['HOME'] = dir
+  process.env['USERPROFILE'] = dir
+  try {
+    await fn()
+  } finally {
+    if (orig.home === undefined) delete process.env['HOME']
+    else process.env['HOME'] = orig.home
+    if (orig.profile === undefined) delete process.env['USERPROFILE']
+    else process.env['USERPROFILE'] = orig.profile
+    await rm(dir, { recursive: true, force: true })
+  }
+}
 
 /** Run `fn` with `process.exit` and `console.error` stubbed; capture both. */
 async function captureExit(fn: () => Promise<void> | void): Promise<{ code: number; errors: string[] }> {
@@ -76,28 +103,28 @@ describe('CLI handler argv parsing', () => {
   // error fires instead, argv parsing failed earlier — that's the
   // regression we're guarding against.
 
-  it('runRecall: multi-word positional + --k passes argv parsing', async () => {
+  it('runRecall: multi-word positional + --k passes argv parsing', () => withTmpHome(async () => {
     const { errors } = await captureExit(() => runRecall('TypeScript', ['project', 'preferences', '--k=3']))
     expect(errors.join('\n')).toMatch(/No mementos daemon running/)
     expect(errors.join('\n')).not.toMatch(/Usage:/)
-  })
+  }))
 
-  it('runList range-mode flags all pass argv parsing', async () => {
+  it('runList range-mode flags all pass argv parsing', () => withTmpHome(async () => {
     for (const trigger of [['--start=2026-01-01'], ['--end=2026-12-31'], ['--query=foo'], ['--k=5']]) {
       const { errors } = await captureExit(() => runList(undefined, trigger))
       expect(errors.join('\n')).toMatch(/No mementos daemon running/)
     }
-  })
+  }))
 
-  it('runList tag-mode (positional) passes argv parsing', async () => {
+  it('runList tag-mode (positional) passes argv parsing', () => withTmpHome(async () => {
     const { errors } = await captureExit(() => runList('preference', ['user']))
     expect(errors.join('\n')).toMatch(/No mementos daemon running/)
-  })
+  }))
 
-  it('runList tag-mode (--tags) passes argv parsing', async () => {
+  it('runList tag-mode (--tags) passes argv parsing', () => withTmpHome(async () => {
     const { errors } = await captureExit(() => runList(undefined, ['--tags=preference,user']))
     expect(errors.join('\n')).toMatch(/No mementos daemon running/)
-  })
+  }))
 })
 
 describe('translateMcpToCli', () => {
