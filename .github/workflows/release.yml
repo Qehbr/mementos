@@ -16,7 +16,7 @@ jobs:
     name: Build + test + publish to npm
     runs-on: ubuntu-latest
     permissions:
-      contents: read
+      contents: write   # required to create the GitHub Release at the end of this job
       id-token: write   # required for OIDC auth to npm (trusted publishing)
     steps:
       - uses: actions/checkout@v5
@@ -48,3 +48,25 @@ jobs:
 
       - name: Publish to npm
         run: npm publish --access public
+
+      # Last, so a Release only ever appears for a version that actually reached npm.
+      # `gh` is preinstalled on GitHub runners — no third-party action, no extra
+      # supply-chain surface.
+      #
+      # Idempotent on purpose: a tag can arrive here two ways — pushed from the CLI
+      # (no Release exists yet, so create one) or created by publishing a Release in
+      # the GitHub UI, which pushes the tag and triggers this workflow (a Release
+      # already exists, and overwriting it would discard hand-written notes). Without
+      # the guard the second path fails the job *after* npm has already published.
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            echo "Release $GITHUB_REF_NAME already exists — leaving its notes untouched."
+          else
+            gh release create "$GITHUB_REF_NAME" \
+              --title "$GITHUB_REF_NAME" \
+              --verify-tag \
+              --generate-notes
+          fi
