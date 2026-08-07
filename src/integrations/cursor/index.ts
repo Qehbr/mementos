@@ -1,6 +1,6 @@
 /**
  * CursorIntegration — MCP entry in `~/.cursor/mcp.json`. MCP only (Cursor's hook can't
- * inject context; no global skill convention). See DESIGN.md for the rationale.
+ * inject context; no global skill convention).
  */
 import { join } from 'node:path'
 import { homedir } from 'node:os'

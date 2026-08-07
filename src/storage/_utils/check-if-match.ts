@@ -9,8 +9,8 @@
  * Important caveat: this is a check-then-write, NOT atomic CAS. There's a narrow race
  * window between the `get()` here and the subsequent `writeFile()` in the caller where
  * an external writer could land — that case is NOT closed without storage-native CAS
- * (S3's `If-Match` header would close it). DESIGN.md acknowledges cross-device write
- * races as out of scope; this is the explicit version of "out of scope."
+ * (S3's `If-Match` header would close it). Cross-device write races are out of scope;
+ * this is the explicit version of "out of scope."
  *
  * Centralised here so the contract is one definition. Two callers today (LocalBackend,
  * GitBackend); a future S3 backend would forward the underlying `If-Match` header instead

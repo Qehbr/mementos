@@ -1,7 +1,5 @@
 /**
- * Vault — the encrypted memory store and core of mementos. See DESIGN.md for the data
- * model (chronicle + memento, chunks-inside-one-file), the index key space, and the
- * concurrency posture.
+ * Vault — the encrypted memory store and core of mementos.
  *
  * One memento = one `<id>.mem` file. Chunk-keyed retrieval (`"<memento_id>#<i>"`) collapses
  * back to mementos in `recall`. Updates use optimistic concurrency: a stale etag throws

@@ -10,8 +10,6 @@
  * Error policy: a missing key throws `KeyNotFoundError` (caller can suggest `init`); a
  * broken keychain backend throws generic `Error` (caller MUST NOT suggest `init`, which
  * would overwrite a valid key behind a temporarily-broken backend).
- *
- * See DESIGN.md for the security trade-offs.
  */
 import { randomBytes } from 'node:crypto'
 import { readFile, writeFile, mkdir, chmod, unlink } from 'node:fs/promises'

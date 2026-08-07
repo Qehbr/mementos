@@ -14,8 +14,8 @@ import lockfile from 'proper-lockfile'
 
 /**
  * Thrown when the vault lock is held for longer than `withLock`'s retry budget — almost
- * always a legitimate long write (first-ONNX-load + slow git push can exceed 10s, per
- * DESIGN.md). Replaces `proper-lockfile`'s opaque "Error: Lock file is already being
+ * always a legitimate long write (first-ONNX-load + slow git push can exceed 10s).
+ * Replaces `proper-lockfile`'s opaque "Error: Lock file is already being
  * held" so the MCP tool surface tells the AI something actionable instead of an
  * implementation detail. AI clients treat this as a transient retry, the same way they
  * treat StaleMementoError.
