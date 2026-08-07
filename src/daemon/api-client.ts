@@ -15,8 +15,7 @@
  * plain HTTP to a localhost port without dispatcher tricks. Future hosted
  * mode just changes the URL.
  */
-import { createConnection } from 'node:net'
-import { DAEMON_HOST, DAEMON_PORT, DAEMON_URL } from './constants.js'
+import { DAEMON_URL } from './constants.js'
 import { readToken } from './token.js'
 
 export class DaemonUnavailableError extends Error {
@@ -28,22 +27,6 @@ export class DaemonApiError extends Error {
 }
 
 /**
- * "Daemon is up AND ready to serve" check — the most common semantic clients
- * need. Returns true only when the state file says `ready` and the recorded
- * PID is alive. A daemon mid-`initializing` returns false here; use
- * `daemonState()` if you need to distinguish.
- *
- * (The TCP-port probe alone is no longer enough: with the race-safe startup,
- * the port is bound for the entire `vault.startup()` window with `initializing`
- * state — a client trusting the port-bind would hammer the daemon with
- * requests it can only 503 back.)
- */
-export async function isDaemonRunning(): Promise<boolean> {
-  const { daemonState } = await import('./state.js')
-  return (await daemonState()) === 'ready'
-}
-
-/**
  * Rich daemon liveness — distinguishes `ready` / `initializing` / `absent`.
  * Use when you need to wait for an initializing daemon to become ready
  * (mcp shim) or tell the user precisely what state the daemon is in
@@ -52,20 +35,6 @@ export async function isDaemonRunning(): Promise<boolean> {
 export async function getDaemonState(): Promise<'ready' | 'initializing' | 'absent'> {
   const { daemonState } = await import('./state.js')
   return daemonState()
-}
-
-/**
- * Cheap port-only probe — true if SOMETHING is bound on the daemon port,
- * false otherwise. Use only for the very narrow "could `mementos start` even
- * try?" question (and even there, `assertPortFree` inside `startHttpApi` is
- * the actual race-safe gate). Most callers want `isDaemonRunning()`.
- */
-export async function isDaemonPortBound(): Promise<boolean> {
-  return new Promise<boolean>(resolve => {
-    const probe = createConnection({ host: DAEMON_HOST, port: DAEMON_PORT })
-    probe.once('connect', () => { probe.destroy(); resolve(true) })
-    probe.once('error', () => resolve(false))
-  })
 }
 
 /**

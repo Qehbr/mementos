@@ -7,6 +7,13 @@
   Works on any device. Private by design.
 </p>
 
+<p align="center">
+  <a href="https://github.com/Qehbr/mementos/actions/workflows/ci.yml"><img src="https://github.com/Qehbr/mementos/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://www.npmjs.com/package/mementos"><img src="https://img.shields.io/npm/v/mementos.svg" alt="npm version"></a>
+  <a href="https://nodejs.org"><img src="https://img.shields.io/node/v/mementos.svg" alt="node version"></a>
+  <a href="./LICENSE"><img src="https://img.shields.io/npm/l/mementos.svg" alt="license"></a>
+</p>
+
 ## How it works
 
 <p align="center">

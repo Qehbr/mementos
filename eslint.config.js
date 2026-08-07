@@ -22,7 +22,12 @@ import tseslint from 'typescript-eslint'
  */
 export default tseslint.config(
   {
-    ignores: ['dist/**', 'node_modules/**', 'coverage/**', 'vitest.config.ts', 'eslint.config.js'],
+    // `src/__tests__/tmp/**` is test scratch (fake HOMEs, bare git repos) — thousands of
+    // files ESLint would walk, and which a concurrent test run deletes mid-walk (ENOENT).
+    ignores: [
+      'dist/**', 'node_modules/**', 'coverage/**', 'src/__tests__/tmp/**',
+      'vitest.config.ts', 'eslint.config.js',
+    ],
   },
   js.configs.recommended,
   ...tseslint.configs.recommendedTypeChecked,

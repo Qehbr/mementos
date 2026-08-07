@@ -1,0 +1,55 @@
+name: Feature request
+description: Suggest a capability or a change in behaviour.
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        mementos is built on auto-discovered abstractions — a storage backend, embedder,
+        vector index, retriever, searcher, key provider, ingestor or client integration is
+        **one folder** under `src/<abstraction>/<name>/`, with no edits to `core/` or the CLI.
+
+        If you are proposing a new implementation of an existing abstraction,
+        [CONTRIBUTING.md](../blob/main/CONTRIBUTING.md) has the discovery contract and a
+        per-abstraction guide — you may not need to open an issue at all.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem does this solve?
+      description: Describe the situation you hit, not the solution you have in mind.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behaviour
+      description: What should mementos do instead?
+    validations:
+      required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Which area does this touch?
+      options:
+        - Storage backend
+        - Embedder
+        - Vector index
+        - Retriever (semantic / hybrid)
+        - Searcher (exact / regex)
+        - Key provider
+        - Ingestor (transcript import)
+        - Client integration (MCP / skills / hooks)
+        - CLI or daemon
+        - Docs
+        - Not sure
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Including any workaround you are using today.

@@ -13,18 +13,14 @@
  * thrown ProcessExitError so tests can assert on those branches.
  */
 import { mkdtemp, mkdir, rm } from 'node:fs/promises'
-import { join, dirname, resolve } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { join } from 'node:path'
 import { randomBytes } from 'node:crypto'
 import { execSync } from 'node:child_process'
 import { vi, type MockInstance } from 'vitest'
 import { setFakeHome } from '../_utils/fake-home.js'
+import { TMP_ROOT } from '../_utils/tmp-root.js'
 
-/** Tests root (this file is at src/__tests__/integration/_helpers.ts). */
-const TESTS_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
-
-/** Scratch root for integration test artefacts. Always `src/__tests__/tmp/`, never `/tmp`. */
-export const TMP_ROOT = join(TESTS_ROOT, 'tmp')
+export { TMP_ROOT }
 
 /** Thrown by the `process.exit` mock so tests can assert on the refuse paths. */
 export class ProcessExitError extends Error {
