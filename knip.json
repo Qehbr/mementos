@@ -11,5 +11,13 @@
     "src/ingestors/*/index.ts!"
   ],
   "project": ["src/**/*.ts!"],
-  "ignoreExportsUsedInFile": true
+  "ignoreExportsUsedInFile": true,
+  // devDeps that mirror the optional peerDependencies. Nothing imports them by name —
+  // `requireFromPlugins` resolves them at runtime — but they must stay installed so the
+  // suite can exercise the HNSW index, the re2 searchers and LAN pairing.
+  "ignoreDependencies": [
+    "hnswlib-node",
+    "re2",
+    "bonjour-service"
+  ]
 }

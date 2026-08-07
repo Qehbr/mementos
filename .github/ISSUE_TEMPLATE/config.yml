@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Question or usage help
+    url: https://github.com/Qehbr/mementos/discussions
+    about: Ask about setup, integrations, or how something is meant to work.
+  - name: Security vulnerability
+    url: https://github.com/Qehbr/mementos/security/advisories/new
+    about: Report privately. Please do not open a public issue for a vulnerability.

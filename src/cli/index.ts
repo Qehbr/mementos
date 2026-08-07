@@ -31,6 +31,7 @@ import { runIngest } from './commands/ingest.js'
 import { runSnapshot } from './commands/snapshot.js'
 import { runBackup, runRestore } from './commands/backup.js'
 import { printBanner } from './_utils/banner.js'
+import { packageVersion } from './_utils/version.js'
 
 // A failed subcommand rejects the top-level await below — most often `buildVault()`
 // reporting an uninitialised vault or a pending migration, whose Error message already
@@ -94,6 +95,12 @@ try {
       printBanner()
       printFullHelp()
       break
+    // No banner: `mementos --version` is read by scripts, so stdout stays the bare version.
+    case 'version':
+    case '--version':
+    case '-v':
+      console.log(packageVersion())
+      break
     default:
       // Unknown command — show the quickstart so the user sees a path forward, but exit 1
       // so scripting doesn't silently treat a typo as success.
@@ -127,6 +134,7 @@ Get started:
   mementos ingest                     Import past conversations (interactive)
 
   mementos --help                     Full command reference
+  mementos --version                  Print the installed version
   mementos doctor                     Check installation health
 `)
 }
@@ -282,6 +290,8 @@ Usage:
                                                idempotent: mementos already in the vault
                                                are skipped automatically, so an
                                                interrupted run resumes cleanly.
+
+  mementos --version  (alias: -v, version)     Print the installed version and exit.
 
   mementos doctor                              Dependency-ordered health check: config,
                                                vault path, key, storage, vault.json,

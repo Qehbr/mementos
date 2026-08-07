@@ -1,0 +1,79 @@
+name: Bug report
+description: Something in mementos does not behave as documented.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for filing a report.
+
+        **Never paste your vault key, your 24-word mnemonic, or the contents of
+        `MEMENTOS_RAW_KEY`.** No one debugging an issue needs them. Memento text
+        may also be personal — redact freely; a shape (`"a 3-line note with 2 tags"`)
+        is usually enough.
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What did you expect, and what did you get instead?
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. mementos init --backend=local --key=env ...
+        2. mementos write "..."
+        3. mementos recall "..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: doctor
+    attributes:
+      label: Output of `mementos doctor`
+      description: >
+        This reports config, vault path, key provider, storage, embedder and index
+        health, and is the single most useful thing for diagnosis. It prints no
+        secrets and no memento text.
+      render: text
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: mementos version
+      description: Output of `mementos --version`.
+    validations:
+      required: true
+
+  - type: input
+    id: node
+    attributes:
+      label: Node version
+      description: Output of `node --version`.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options:
+        - Linux
+        - macOS
+        - Windows
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant output
+      description: >
+        Re-run the failing command with `MEMENTOS_DEBUG=1` for a full stack trace.
+      render: shell
