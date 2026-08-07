@@ -31,8 +31,7 @@ export const HNSW_RANDOM_SEED = 100
  * underlying counter, even with `allowReplaceDeleted=true`).
  *
  * 100k is far beyond realistic personal-vault size. Long-running vaults with extreme churn
- * (millions of cumulative adds + deletes over years) eventually need a manual rebuild. See
- * DESIGN.md for the trade-off.
+ * (millions of cumulative adds + deletes over years) eventually need a manual rebuild.
  */
 export const MAX_ELEMENTS = 100_000
 
@@ -66,6 +65,5 @@ export const FILTERED_EF_SAFETY = 1.5
  * bounds worst-case query latency. At extremely selective filters this cap is hit; the
  * accepted trade-off is that very-rare-tag queries (<0.5% of corpus) may under-recall
  * due to HNSW graph-holes (matching nodes in regions the traversal doesn't visit).
- * Documented in DESIGN.md retrieval section.
  */
 export const FILTERED_MAX_EF = 5000

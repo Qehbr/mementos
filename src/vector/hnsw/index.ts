@@ -8,8 +8,7 @@
  * class keeps two Maps for the bidirectional translation. The numeric counter is monotonic
  * — `markDelete` frees the slot for reuse via `allowReplaceDeleted=true` but the label is
  * never re-issued. After enough cumulative adds (independent of how many are still live),
- * addPoint will fail; the cap is the `MAX_ELEMENTS` constant. See DESIGN.md for the
- * long-term-churn trade-off.
+ * addPoint will fail; the cap is the `MAX_ELEMENTS` constant.
  *
  * Serialization uses a /tmp file because hnswlib only supports file-based I/O. The tmp file
  * contains plaintext vectors and is cleaned up in `finally` so it doesn't leak on errors.
