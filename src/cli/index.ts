@@ -43,20 +43,23 @@ import { packageVersion } from './_utils/version.js'
 // Ctrl-C inside an interactive `@inquirer/prompts` call rejects with `ExitPromptError`
 // — that's not an error worth a stack trace; the user intentionally aborted. Exit 130
 // (the POSIX convention for SIGINT-terminated programs) with no output.
-process.on('unhandledRejection', (reason: unknown) => {
+function reportFatal(reason: unknown): never {
   if (reason instanceof Error && reason.name === 'ExitPromptError') process.exit(130)
   const err = reason instanceof Error ? reason : new Error(String(reason))
   console.error(err.message)
   if (process.env['MEMENTOS_DEBUG']) console.error(err.stack)
   process.exit(1)
-})
+}
+
+process.on('unhandledRejection', reportFatal)
 
 const [, , command, subcommand, ...args] = process.argv
 
 // Top-level try/catch belt-and-braces alongside the unhandledRejection handler
 // above. In Node 22's default `--unhandled-rejections=throw` mode the runtime
-// can still print an ExitPromptError trace BEFORE the rejection handler runs;
-// catching here suppresses it cleanly and exits 130 (POSIX SIGINT convention).
+// prints the trace itself BEFORE the rejection handler runs, so anything that
+// escapes a subcommand has to be reported here or the user gets a raw stack
+// where an actionable one-line message was intended.
 try {
   switch (command) {
     case 'init':        await runInit(); break
@@ -112,8 +115,7 @@ try {
       process.exitCode = 1
   }
 } catch (e) {
-  if (e instanceof Error && e.name === 'ExitPromptError') process.exit(130)
-  throw e
+  reportFatal(e)
 }
 
 /**

@@ -42,6 +42,19 @@ explicit and justified in a comment. Default: throw.
   never inline in the implementation — `<name>/index.ts` holds logic,
   `<name>/constants.ts` holds its knobs. This is uniform: if one implementation of
   an abstraction has a `constants.ts`, they all do.
+  - **`constants.ts` is for tunables, not prose.** User-facing message text is not
+    a knob. Do not lift a sentence into a named constant so another layer can
+    match on it — see the next rule for why that is the actual problem.
+- **Never reconstruct a fact by matching on prose.** If a layer needs to know
+  *what happened* (not found, already exists, degraded), that must arrive as data
+  — a typed error, a field, a status. Never by inspecting a rendered message,
+  even via a shared constant or a helper like `isNotFound(text)`. Naming the
+  literal does not weaken the coupling, it disguises it: the next reader sees a
+  contract where there is only a string that two layers happen to agree on today,
+  and any rewording silently changes behaviour. If the signal isn't in the data,
+  the honest options are to carry it properly at the layer that knows it, or to
+  not offer the feature. A cheap wrong version is worse than neither, because it
+  looks correct in review.
 - **Keep the project layout uniform.** The same shapes everywhere: an abstraction
   implementation is `<abstraction>/<name>/index.ts` (+ `<name>/constants.ts` for
   its tunables); code shared across an abstraction's implementations lives in

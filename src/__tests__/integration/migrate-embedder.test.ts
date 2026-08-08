@@ -15,6 +15,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mkdtemp, mkdir, rm, readdir, readFile, stat, writeFile } from 'node:fs/promises'
 import { setFakeHome } from '../_utils/fake-home.js'
+import { setFakeTTY } from '../_utils/fake-tty.js'
 import { TMP_ROOT } from './_helpers.js'
 import { join } from 'node:path'
 import { randomBytes } from 'node:crypto'
@@ -112,7 +113,12 @@ describe('mementos migrate (embedder)', () => {
   let origArgv: string[]
   let exitSpy: ReturnType<typeof vi.spyOn>
 
+  let restoreTTY: () => void
+
   beforeEach(async () => {
+    // These tests mock @inquirer/prompts to stand in for a user at the wizard; the
+    // prompt helpers also require a terminal, which vitest's stdin is not.
+    restoreTTY = setFakeTTY(true)
     // Repo-local fake home (not os.tmpdir()): requireFromPlugins' walk-up must
     // reach the repo's node_modules, else init's hnsw setup runs a real npm
     // install (network + C++ toolchain) inside the test.
@@ -137,6 +143,7 @@ describe('mementos migrate (embedder)', () => {
   })
 
   afterEach(async () => {
+    restoreTTY()
     exitSpy.mockRestore()
     vi.restoreAllMocks()
     process.argv = origArgv
