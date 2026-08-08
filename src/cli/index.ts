@@ -27,6 +27,7 @@ import { runShareKey } from './commands/share-key.js'
 import { runDestroy } from './commands/destroy.js'
 import { runMigrate } from './commands/migrate.js'
 import { runDoctor } from './commands/doctor.js'
+import { runStatus } from './commands/status.js'
 import { runIngest } from './commands/ingest.js'
 import { runSnapshot } from './commands/snapshot.js'
 import { runBackup, runRestore } from './commands/backup.js'
@@ -82,6 +83,7 @@ try {
     case 'migrate':     await runMigrate(); break
     case 'backup':      await runBackup(subcommand); break
     case 'restore':     await runRestore(subcommand); break
+    case 'status':      await runStatus(); break
     case 'doctor':      await runDoctor(); break
     case 'ingest':      await runIngest(subcommand, args); break
     case 'snapshot':    await runSnapshot(); break
@@ -133,6 +135,7 @@ Get started:
                                         (claude-code, codex, antigravity-cli, claude-desktop, …)
   mementos ingest                     Import past conversations (interactive)
 
+  mementos status                     Daemon + vault at a glance
   mementos --help                     Full command reference
   mementos --version                  Print the installed version
   mementos doctor                     Check installation health
@@ -292,6 +295,12 @@ Usage:
                                                interrupted run resumes cleanly.
 
   mementos --version  (alias: -v, version)     Print the installed version and exit.
+
+  mementos status                              Daemon state, vault path + memento count,
+                                               backend and embedder — read straight off
+                                               disk, so it stays fast on large vaults and
+                                               always exits 0. Use \`doctor\` when you need
+                                               something verified or a non-zero exit code.
 
   mementos doctor                              Dependency-ordered health check: config,
                                                vault path, key, storage, vault.json,
