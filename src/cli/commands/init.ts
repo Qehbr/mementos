@@ -623,6 +623,11 @@ export async function setupIntegrations(
   } else {
     ctx.print('No AI client integrations are currently installed. To use mementos with an AI client later:')
     ctx.print('  mementos integration enable <name>')
+    // With an integration wired up the client starts the daemon on connect, so the user
+    // never needs to know it exists. With none, the CLI is the only surface — and every
+    // vault command needs a daemon that nothing has started yet.
+    ctx.print('\nUsing mementos from the CLI? Start the daemon first:')
+    ctx.print('  mementos start')
   }
 
   ctx.print('\nWhen you want to remove mementos: run `mementos uninstall` FIRST (it cleans')

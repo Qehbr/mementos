@@ -16,6 +16,23 @@ export const BACK = Symbol('wizard.back')
 export type BackOr<T> = T | typeof BACK
 
 /**
+ * Refuse to open a prompt when there is no terminal to answer it on.
+ *
+ * Without this, `@inquirer/prompts` rejects with `ExitPromptError` on a non-TTY stdin,
+ * which the CLI entry treats as a user-pressed-Ctrl-C and turns into a bare exit 130 —
+ * the caller gets a SIGINT-shaped exit plus Node's "unsettled top-level await" warning
+ * and nothing naming the cause. Scripted installs (Docker, CI) hit that whenever a
+ * single flag is missing, so say which flag would have skipped this step.
+ */
+function assertInteractive(label: string, flag: string): void {
+  if (process.stdin.isTTY) return
+  throw new Error(
+    `Cannot prompt for "${label}" — stdin is not a terminal.\n` +
+    `  Pass --${flag}=<value> to answer it non-interactively, or run in a terminal.`,
+  )
+}
+
+/**
  * Per-integration question counter. Renders `[▰▰▱▱] N/M` inline as a prefix
  * to the prompt label. Used inside an integration's setupAtInit to track
  * questions specific to that integration (e.g. Claude Code's 3 hook toggles).
@@ -143,6 +160,7 @@ async function pickChoice<F>(
 ): Promise<BackOr<string>> {
   const fromFlag = ctx.getFlag(flag)
   if (fromFlag !== undefined && fromFlag !== '') return fromFlag
+  assertInteractive(label, flag)
   const keys = [...registry.keys()]
   // No auto-skip when there's only one option — always prompt so the user
   // sees what's being chosen and can confirm explicitly.
@@ -184,6 +202,7 @@ export async function promptPath(
 ): Promise<string> {
   const fromFlag = ctx.getFlag(flag)
   if (fromFlag !== undefined && fromFlag !== '') return validatePath(fromFlag)
+  assertInteractive(label, flag)
   const seed = currentValue ?? defaultPath
   const renderedLabel = currentValue ? `${label} ${dim('(current)')}` : label
   return validatePath(await input({ message: renderedLabel, default: seed, theme: promptTheme }))
