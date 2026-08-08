@@ -7,6 +7,12 @@
  * Test isolation contract — same posture as the migrate / destroy tests: HOME is
  * per-test tmpdir, @napi-rs/keyring is mocked to a no-op, @inquirer/prompts is mocked,
  * integration registry is mocked empty so real `claude mcp` is never invoked.
+ *
+ * The daemon port is the one piece of state a fake HOME cannot isolate — it is global
+ * to the machine, and contributors run real daemons. `isDaemonPortBound` is stubbed
+ * false so these cases describe what they mean to describe (a vault with no daemon),
+ * instead of failing on whatever happens to hold the port. The orphaned-port branch
+ * it guards has its own coverage in daemon-orphaned-port.test.ts.
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mkdtemp, mkdir, rm, stat } from 'node:fs/promises'
@@ -32,6 +38,11 @@ vi.mock('@napi-rs/keyring', () => ({
 
 vi.mock('../../integrations/registry.js', () => ({
   loadIntegrations: async (): Promise<Map<string, unknown>> => new Map(),
+}))
+
+vi.mock('../../daemon/api-client.js', async (importOriginal) => ({
+  ...await importOriginal<typeof import('../../daemon/api-client.js')>(),
+  isDaemonPortBound: async (): Promise<boolean> => false,
 }))
 
 class ProcessExitError extends Error {

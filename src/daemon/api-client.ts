@@ -15,7 +15,8 @@
  * plain HTTP to a localhost port without dispatcher tricks. Future hosted
  * mode just changes the URL.
  */
-import { DAEMON_URL } from './constants.js'
+import { createConnection } from 'node:net'
+import { DAEMON_HOST, DAEMON_PORT, DAEMON_URL } from './constants.js'
 import { readToken } from './token.js'
 
 export class DaemonUnavailableError extends Error {
@@ -24,6 +25,22 @@ export class DaemonUnavailableError extends Error {
 
 export class DaemonApiError extends Error {
   constructor(message: string) { super(message); this.name = 'DaemonApiError' }
+}
+
+/**
+ * True if anything is listening on the daemon port.
+ *
+ * Deliberately independent of the state files: the two disagree exactly when a
+ * daemon is orphaned (holding the port with no readable `daemon.state`), which is
+ * the condition `doctor` and `start` must be able to name. Not a liveness check —
+ * callers wanting "is the daemon usable?" want `getDaemonState()`.
+ */
+export async function isDaemonPortBound(): Promise<boolean> {
+  return new Promise<boolean>(resolve => {
+    const probe = createConnection({ host: DAEMON_HOST, port: DAEMON_PORT })
+    probe.once('connect', () => { probe.destroy(); resolve(true) })
+    probe.once('error', () => resolve(false))
+  })
 }
 
 /**
