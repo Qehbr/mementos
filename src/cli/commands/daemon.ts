@@ -30,12 +30,12 @@ import { fileURLToPath } from 'node:url'
 import { dirname, resolve as resolvePath } from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
 import { runDaemon } from '../../daemon/runner.js'
-import { getDaemonState } from '../../daemon/api-client.js'
+import { getDaemonState, isDaemonPortBound } from '../../daemon/api-client.js'
 import {
   readDaemonStateFile, deleteDaemonStateFile, isProcessAlive,
 } from '../../daemon/state.js'
 import {
-  DAEMON_URL, SPAWN_SANITY_CHECK_MS, AUTOSTART_POLL_INTERVAL_MS,
+  DAEMON_URL, DAEMON_PORT, SPAWN_SANITY_CHECK_MS, AUTOSTART_POLL_INTERVAL_MS,
 } from '../../daemon/constants.js'
 import { parseFlag } from '../_utils/flags.js'
 
@@ -59,6 +59,16 @@ export async function runStart(): Promise<void> {
     console.error(`mementos daemon already initializing (PID ${file?.pid}, started ${ago}s ago).`)
     console.error('Wait for it to finish — large vaults take a minute or two on first start —')
     console.error('or run `mementos stop` to abort and retry.')
+    process.exit(1)
+  }
+
+  // `absent` only means the state file is unreadable — the port can still be held by
+  // an orphaned daemon. Detecting that here turns a spawn that dies on the bind (and
+  // reports only "exited within 1500ms") into a diagnosis the user can act on.
+  if (state === 'absent' && await isDaemonPortBound()) {
+    console.error(`mementos start: port ${DAEMON_PORT} is already bound, but no readable daemon state exists.`)
+    console.error('An orphaned daemon (or an unrelated process) is holding it — `mementos stop` cannot identify it.')
+    console.error(`Find it with \`ss -ltnp | grep ${DAEMON_PORT}\` (or \`lsof -i :${DAEMON_PORT}\`), kill that PID, then retry.`)
     process.exit(1)
   }
 
@@ -91,9 +101,16 @@ export async function runStart(): Promise<void> {
 export async function runStop(): Promise<void> {
   const file = await readDaemonStateFile()
   if (!file) {
-    // Either no state file at all OR the file's PID is dead. Either way:
-    // no daemon to stop. Clean up any stale file and exit informatively.
+    // No state file, or its PID is dead — nothing here can be signalled. Whether the
+    // port is bound decides which of two very different situations this is, and saying
+    // "no daemon running" while something holds the port sends the user in circles.
     await deleteDaemonStateFile()
+    if (await isDaemonPortBound()) {
+      console.error(`mementos stop: port ${DAEMON_PORT} is bound, but no readable daemon state exists.`)
+      console.error('The process holding it cannot be identified from mementos state, so it cannot be stopped here.')
+      console.error(`Find it with \`ss -ltnp | grep ${DAEMON_PORT}\` (or \`lsof -i :${DAEMON_PORT}\`) and kill that PID.`)
+      process.exit(1)
+    }
     console.error('mementos stop: no daemon running.')
     process.exit(1)
   }

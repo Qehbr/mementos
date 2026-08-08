@@ -30,9 +30,9 @@ import { memAad } from '../../core/vault/aad.js'
 import { MEM_EXTENSION } from '../../core/vault/constants.js'
 import { requireImpl, buildKeyProvider, buildStorageBackend, buildStorageAndKey } from '../_utils/vault.js'
 import { readManifest } from '../_utils/migration-manifest.js'
-import { getDaemonState } from '../../daemon/api-client.js'
+import { getDaemonState, isDaemonPortBound } from '../../daemon/api-client.js'
 import { readDaemonStateFile } from '../../daemon/state.js'
-import { DAEMON_URL, daemonTokenFile } from '../../daemon/constants.js'
+import { DAEMON_URL, DAEMON_PORT, daemonTokenFile } from '../../daemon/constants.js'
 import type { MachineConfig, VaultConfig } from '../../core/types.js'
 import type { MemFile } from '../../core/vault/types.js'
 
@@ -305,6 +305,16 @@ async function checkIndexCache(_machine: MachineConfig): Promise<CheckResult> {
 async function checkDaemon(): Promise<CheckResult> {
   const state = await getDaemonState()
   if (state === 'absent') {
+    // The state file says nothing is running, but the port is the real authority:
+    // a daemon whose state file was lost still holds it, and reporting "not running"
+    // while `mementos start` fails on the bind leaves the user with no diagnosis.
+    if (await isDaemonPortBound()) {
+      return {
+        name: 'Daemon', status: 'fail',
+        detail: `port ${DAEMON_PORT} is bound but no readable daemon state — an orphaned process is holding it`,
+        hint: `find it with \`ss -ltnp | grep ${DAEMON_PORT}\` (or \`lsof -i :${DAEMON_PORT}\`) and kill that PID, then \`mementos start\``,
+      }
+    }
     return {
       name: 'Daemon', status: 'ok',
       detail: 'not running (informational) — start with `mementos start` to use CLI commands or AI clients',
