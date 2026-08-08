@@ -38,6 +38,7 @@ import {
   DAEMON_URL, DAEMON_PORT, SPAWN_SANITY_CHECK_MS, AUTOSTART_POLL_INTERVAL_MS,
 } from '../../daemon/constants.js'
 import { parseFlag } from '../_utils/flags.js'
+import { secondsSince } from '../_utils/time.js'
 
 /** Default budget for `ensureDaemonRunning` callers that need a bound. Hooks. */
 const DEFAULT_ENSURE_TIMEOUT_MS = 5_000
@@ -227,8 +228,3 @@ async function waitForReady(timeoutMs: number | null, spawnedPid?: number): Prom
   return false
 }
 
-function secondsSince(iso: string): string {
-  const then = Date.parse(iso)
-  if (Number.isNaN(then)) return '?'
-  return String(Math.max(0, Math.round((Date.now() - then) / 1000)))
-}

@@ -35,6 +35,7 @@ import { readDaemonStateFile } from '../../daemon/state.js'
 import { DAEMON_URL, DAEMON_PORT, daemonTokenFile } from '../../daemon/constants.js'
 import type { MachineConfig, VaultConfig } from '../../core/types.js'
 import type { MemFile } from '../../core/vault/types.js'
+import { secondsSince } from '../_utils/time.js'
 
 type CheckStatus = 'ok' | 'fail' | 'skip'
 interface CheckResult {
@@ -350,11 +351,6 @@ async function checkDaemon(): Promise<CheckResult> {
   return { name: 'Daemon', status: 'ok', detail: `running at ${DAEMON_URL} (token OK)` }
 }
 
-function secondsSince(iso: string): string {
-  const then = Date.parse(iso)
-  if (Number.isNaN(then)) return '?'
-  return String(Math.max(0, Math.round((Date.now() - then) / 1000)))
-}
 
 async function checkIntegrations(): Promise<CheckResult[]> {
   const reg = await loadIntegrations()
